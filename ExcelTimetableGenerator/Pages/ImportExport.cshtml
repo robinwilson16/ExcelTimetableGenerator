@@ -1,0 +1,25 @@
+﻿@page
+@model ExcelTimetableGenerator.Pages.ImportExportModel
+@{
+    ViewData["Title"] = "ImportExport";
+}
+
+<h1>ImportExport</h1>
+
+<form method="post" enctype="multipart/form-data">
+    <div class="row">
+        <div class="col-md-4">
+            <input type="file" id="fUpload" name="files" class="form-control" />
+        </div>
+        <div class="col-md-8">
+            <input type="button" id="btnUpload" value="Upload" />
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-md-8" style="padding-top:10px;">
+            <button asp-page-handler="Export">Export</button>
+        </div>
+    </div>
+    <br />
+    <div id="dvData"></div>
+</form>

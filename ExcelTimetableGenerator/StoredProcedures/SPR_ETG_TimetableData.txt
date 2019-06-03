@@ -1,0 +1,134 @@
+CREATE PROCEDURE SPR_ETG_TimetableData
+	@AcademicYear NVARCHAR(5),
+	@PlanRevisionID INT
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+	--DECLARE @AcademicYear NVARCHAR(5) = N'19/20'
+	--DECLARE @PlanRevisionID INT = 66
+
+	SELECT
+		TimetableID = CRS.OfferingID,
+		SiteCode = STE.Code,
+		SiteName = STE.Description,
+		FacCode = PS.Level1Code,
+		FacName = FAC.LevelName,
+		TeamCode = PS.Level2Code,
+		TeamName = PS.LevelName,
+		ProgCode = PRG.Code,
+		ProgName = PRG.Name,
+		ProgStatus = COALESCE ( STA.Description, 'Not Assigned' ),
+		CourseCode = CRS.CourseCode,
+		CourseTitle = CRS.CourseTitle,
+		IsMainCourse = CRS.IsMainOffering,
+		CourseStatus = CRS.CourseStatus,
+		CourseOrder = 
+			CASE
+				WHEN CRS.IsMainOffering IS NULL THEN 0
+				WHEN CRS.IsMainOffering = 1 THEN 1
+				WHEN CRS.CourseTitle LIKE '%FS%' OR CRS.CourseTitle LIKE '%Func%' THEN 3
+				WHEN CRS.CourseTitle LIKE '%GCSE%' OR CRS.CourseTitle LIKE '%Func%' THEN 4
+				WHEN CRS.CourseTitle LIKE '%Tut%' THEN 5
+				WHEN CRS.AimCode IS NULL THEN 6
+				ELSE 2
+			END,
+		CRS.AimCode,
+		CRS.StartDate,
+		CRS.EndDate,
+		CRS.PLH1618,
+		CRS.PLH19,
+		CRS.EEP1618,
+		CRS.EEP19,
+		CRS.HoursPerWeek,
+		CRS.Weeks,
+		CRS.YearNo,
+		CRS.NoOfYears,
+		CRS.ModeOfAttendanceCode,
+		CRS.ModeOfAttendanceName,
+		CRS.FundStream,
+		CRS.FundSource,
+		CRS.ProgType,
+		CRS.FundModel,
+		CRS.GroupSize,
+		CRS.NumGroups
+	FROM [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.CCS_Offering PRG --Parent
+	INNER JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.PlanEntity PLN
+		ON PLN.OfferingID = PRG.OfferingID
+		AND PLN.RevisionIdentity = @PlanRevisionID
+	INNER JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.StatusCourse STA
+		ON STA.StatusCourseID = PLN.StatusCourseID
+	INNER JOIN (
+		SELECT
+			ParentID = LNK.MainOfferingID,
+			IsMainOffering = LNK.IsMainOffering,
+			OfferingID = CRS.OfferingID,
+			CourseCode = CRS.Code,
+			CourseTitle = CRS.Name,
+			AimCode = CRS.QualID,
+			CourseStatus = COALESCE ( STA.Description, 'Not Assigned' ),
+			CRS.StartDate,
+			CRS.EndDate,
+			PLH1618 = CRS.PlannedLearningHours1618,
+			PLH19 = CRS.PlannedLearningHours19Plus,
+			EEP1618 = CRS.PlannedEEPHours1618,
+			EEP19 = CRS.PlannedEEPHours19Plus,
+			CRS.HoursPerWeek,
+			CRS.Weeks,
+			CRS.YearNo,
+			CRS.NoOfYears,
+			ModeOfAttendanceCode = CRS.ModeOfAttendanceID,
+			ModeOfAttendanceName = MOA.Description,
+			FundStream = CRS.FundingStream,
+			FundSource = CRS.MajorFundingSourceID,
+			ProgType = CRS.ProgTypeID,
+			FundModel = 
+				CASE
+					WHEN CRS.FundingStream = '25' THEN '16-19 Funded'
+					WHEN CRS.FundingStream = '36' THEN 'App Standard'
+					WHEN CRS.ProgTypeID = '25' THEN 'App Standard'
+					WHEN CRS.FundingStream = '35' AND CRS.ProgTypeID IS NOT NULL THEN 'App Framework'
+					WHEN CRS.MajorFundingSourceID = '001' THEN 'Higher Education'
+					WHEN CRS.FundingStream = '99' THEN 'Not Funded'
+					WHEN CRS.FundingStream IS NULL THEN '-- Unknown --'
+				END,
+			GroupSize = PGS.GroupSize,
+			NumGroups = COALESCE ( CAST ( PGS.NoOfGroups AS INT ), 1 )
+		FROM [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.CCS_Offering CRS --Child
+		INNER JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.CCS_LinkedOffering LNK
+			ON LNK.SubOfferingID = CRS.OfferingID
+		INNER JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.PlanEntity PLN
+			ON PLN.OfferingID = CRS.OfferingID
+			AND PLN.RevisionIdentity = @PlanRevisionID
+		INNER JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.StatusCourse STA
+			ON STA.StatusCourseID = PLN.StatusCourseID
+		INNER JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.PlanGroupSize PGS
+			ON PGS.PlanEntityID = PLN.PlanEntityID
+		LEFT JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.ModeOfAttendance MOA
+			ON MOA.ModeOfAttendanceID = CRS.ModeOfAttendanceID
+		WHERE
+			CRS.AcademicYear = @AcademicYear
+			AND STA.StatusCode = 8 --Running (Approved)
+	) CRS
+		ON CRS.ParentID = PRG.OfferingID
+	--LEFT JOIN (
+	--	SELECT DISTINCT --Confirm no parents
+	--		OfferingID = LNK.SubOfferingID
+	--	FROM CCS_LinkedOffering LNK
+	--) PAR
+	--	ON PAR.OfferingID = PRG.OfferingID
+	LEFT JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.Site STE
+		ON STE.SiteID = PRG.SiteID
+	LEFT JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.PlanSummary PS
+		ON PS.OfferingID = PRG.OfferingID
+	LEFT JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.CCS_CollegeStructure FAC
+		ON FAC.Level1Code = PS.Level1Code
+		AND FAC.AcademicYear = @AcademicYear
+		AND FAC.LevelNumber = 1
+	LEFT JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.PlanGroupSize PGS
+		ON PGS.PlanEntityID = PS.PlanEntityID
+	WHERE
+		PRG.AcademicYear = @AcademicYear
+		--AND PAR.OfferingID IS NULL --Parent doesn't have a parent
+		AND STA.StatusCode = 8 --Running (Approved)
+END

@@ -1,0 +1,11 @@
+CREATE PROCEDURE [dbo].[SPR_ETG_Config]
+AS
+
+BEGIN
+	SET NOCOUNT ON;
+    SELECT
+        AcademicYear = CFG.Value
+    FROM Config CFG
+    WHERE
+        CFG.ConfigID = 'ETG_AcademicYearID'
+END
