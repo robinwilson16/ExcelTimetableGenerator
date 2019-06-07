@@ -13,6 +13,12 @@ namespace ExcelTimetableGenerator.Models
 
         public int ProgrammeID { get; set; }
 
+        [StringLength(20)]
+        public string SiteCode { get; set; }
+
+        [StringLength(100)]
+        public string SiteName { get; set; }
+
         [StringLength(72)]
         public string CourseCode { get; set; }
 
@@ -42,8 +48,10 @@ namespace ExcelTimetableGenerator.Models
 
         public int? PLH1618 { get; set; }
         public int? PLH19 { get; set; }
+        public int? PLHMax { get; set; }
         public int? EEP1618 { get; set; }
         public int? EEP19 { get; set; }
+        public int? EEPMax { get; set; }
 
         [Display(Name = "Hours per Week")]
         [Column(TypeName = "decimal(9,2)")]
@@ -72,6 +80,7 @@ namespace ExcelTimetableGenerator.Models
 
         public int? GroupSize { get; set; }
         public int? NumGroups { get; set; }
+        public string Notes { get; set; }
 
         public Programme Programme { get; set; }
     }

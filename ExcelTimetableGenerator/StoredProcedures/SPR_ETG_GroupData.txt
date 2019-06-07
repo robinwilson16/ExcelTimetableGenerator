@@ -1,0 +1,52 @@
+CREATE PROCEDURE [dbo].[SPR_ETG_GroupData]
+	@AcademicYear NVARCHAR(5),
+	@PlanRevisionID INT
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+	--DECLARE @AcademicYear NVARCHAR(5) = N'19/20'
+	--DECLARE @PlanRevisionID INT = 66
+
+	SELECT
+		GroupID = CAST ( PRG.OfferingID AS NVARCHAR(20) ) + N'-' + CAST ( GRP.GroupNum AS NVARCHAR(10) ),
+		ProgrammeID = PRG.OfferingID,
+		GroupCode = GRP.GroupCode,
+		ProgCodeWithGroup = PRG.Code + '-' + GRP.GroupCode
+	FROM [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.CCS_Offering PRG --Parent
+	INNER JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.PlanEntity PLN
+		ON PLN.OfferingID = PRG.OfferingID
+		AND PLN.RevisionIdentity = @PlanRevisionID
+	INNER JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.StatusCourse STA
+		ON STA.StatusCourseID = PLN.StatusCourseID
+	LEFT JOIN (
+		SELECT DISTINCT --Confirm no parents
+			OfferingID = LNK.SubOfferingID
+		FROM [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.CCS_LinkedOffering LNK
+	) PAR
+		ON PAR.OfferingID = PRG.OfferingID
+	LEFT JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.PlanGroupSize PGS
+		ON PGS.PlanEntityID = PLN.PlanEntityID
+	INNER JOIN (
+		SELECT
+			GroupNum = CNT.RowNum,
+			GroupCode = CHAR ( CNT.RowNum + 64 )
+		FROM (
+			SELECT
+				RowNum = 
+					ROW_NUMBER () OVER ( 
+						ORDER BY
+							OBJ.object_id
+					)
+			FROM sys.all_objects OBJ
+		) CNT
+	) GRP
+		ON GRP.GroupNum <= COALESCE ( CAST ( PGS.NoOfGroups AS INT ), 1 )
+	WHERE
+		PRG.AcademicYear = @AcademicYear
+		AND PAR.OfferingID IS NULL --Parent doesn't have a parent
+		AND STA.StatusCode = 8 --Running (Approved)
+	ORDER BY
+		PRG.Code,
+		GRP.GroupCode
+END

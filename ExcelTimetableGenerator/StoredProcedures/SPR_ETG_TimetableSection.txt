@@ -1,0 +1,12 @@
+CREATE PROCEDURE [dbo].[SPR_ETG_TimetableSection]
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+	SELECT
+		SEC.TimetableSectionID,
+		SEC.SectionName
+	FROM ETG_TimetableSection SEC
+	ORDER BY
+		SEC.TimetableSectionID
+END
