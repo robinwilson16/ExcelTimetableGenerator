@@ -1,17 +1,67 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data.SqlClient;
 using System.Linq;
 using System.Threading.Tasks;
+using ExcelTimetableGenerator.Data;
+using ExcelTimetableGenerator.Models;
+using ExcelTimetableGenerator.Shared;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace ExcelTimetableGenerator.Pages
 {
     public class IndexModel : PageModel
     {
-        public void OnGet()
-        {
+        private readonly ApplicationDbContext _context;
+        private readonly IConfiguration _configuration;
 
+        public IndexModel(ExcelTimetableGenerator.Data.ApplicationDbContext context, IConfiguration configuration)
+        {
+            _context = context;
+            _configuration = configuration;
+        }
+
+        public string AcademicYear { get; set; }
+        public string UserDetails { get; set; }
+        public string UserGreeting { get; set; }
+        public string SystemVersion { get; set; }
+
+        public IList<SelectListData> ProgrammeSelectList { get; set; }
+
+        public async Task OnGetAsync(string academicYear, int plan, string course)
+        {
+            int planRevisionID = 0;
+
+            if (plan >= 1)
+            {
+                planRevisionID = plan;
+            }
+            else
+            {
+                planRevisionID = int.Parse(_configuration.GetSection("ProResource")["PlanRevisionID"]);
+            }
+
+            AcademicYear = await AcademicYearFunctions.GetAcademicYear(academicYear, _context);
+
+            UserDetails = await Identity.GetFullName(academicYear, User.Identity.Name.Split('\\').Last(), _context);
+
+            UserGreeting = Identity.GetGreeting();
+
+            SystemVersion = _configuration["Version"];
+
+            string CurrentAcademicYear = await AcademicYearFunctions.GetAcademicYear(academicYear, _context);
+            var academicYearParam = new SqlParameter("@AcademicYear", CurrentAcademicYear);
+            var planRevisionIDParam = new SqlParameter("@PlanRevisionID", planRevisionID);
+
+            ProgrammeSelectList = await _context.SelectListData
+                .FromSql("EXEC SPR_ETG_ProgrammeSelectList @AcademicYear, @PlanRevisionID", academicYearParam, planRevisionIDParam)
+                .ToListAsync();
+
+            ViewData["CourseSL"] = new SelectList(ProgrammeSelectList, "Code", "Description");
         }
     }
 }

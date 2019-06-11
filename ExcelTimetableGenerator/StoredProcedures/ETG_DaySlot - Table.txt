@@ -1,0 +1,5 @@
+CREATE TABLE ETG_DaySlot (
+	DaySlotID INT IDENTITY(1,1),
+	NumSlots INT,
+	CONSTRAINT ETG_DaySlot_PK PRIMARY KEY ( DaySlotID )
+)

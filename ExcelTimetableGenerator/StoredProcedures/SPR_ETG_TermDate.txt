@@ -1,0 +1,14 @@
+CREATE PROCEDURE [dbo].[SPR_ETG_TermDate]
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+	SELECT
+		TD.TermDateID,
+		TD.TermDateName,
+		TD.IsTerm,
+		TD.Dates
+	FROM ETG_TermDate TD
+	ORDER BY
+		TD.TermDateID
+END

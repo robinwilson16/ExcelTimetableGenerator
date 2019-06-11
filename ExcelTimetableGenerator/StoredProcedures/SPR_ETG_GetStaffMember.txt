@@ -1,0 +1,25 @@
+CREATE PROCEDURE [dbo].[SPR_ETG_GetStaffMember]
+    @AcademicYear NVARCHAR(5),
+    @UserName NVARCHAR(50)
+    
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+    SELECT
+        StaffRef = STF.StaffRefNo,
+        Forename = STF.FirstName,
+        Surname = UPPER ( SUBSTRING ( STF.Surname, 1, 1 ) ) + LOWER ( SUBSTRING ( STF.Surname, 2, LEN ( STF.Surname ) - 1 ) ),
+        StaffDetails = 
+            STF.FirstName
+            + ' '
+            + UPPER ( SUBSTRING ( STF.Surname, 1, 1 ) ) + LOWER ( SUBSTRING ( STF.Surname, 2, LEN ( STF.Surname ) - 1 ) )
+            + ' ('
+            + STF.StaffRefNo
+            + ')'
+    FROM ProSolution.dbo._CCC_SystemUser SU
+    INNER JOIN ProSolution.dbo.Staff STF
+        ON STF.SystemUserID = SU.SystemUserID
+    WHERE
+        SU.UserName = @UserName
+END

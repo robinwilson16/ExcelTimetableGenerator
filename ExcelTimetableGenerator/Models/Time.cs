@@ -13,9 +13,9 @@ namespace ExcelTimetableGenerator.Models
         public string TimeName { get; set; }
 
         [StringLength(2)]
-        public string Hours { get; set; }
+        public int Hours { get; set; }
 
         [StringLength(2)]
-        public string Mins { get; set; }
+        public int Mins { get; set; }
     }
 }

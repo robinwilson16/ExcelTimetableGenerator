@@ -1,11 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Data.SqlClient;
 using System.Drawing;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using ExcelTimetableGenerator.Data;
 using ExcelTimetableGenerator.Models;
 using ExcelTimetableGenerator.Shared;
 using Microsoft.AspNetCore.Hosting;
@@ -13,8 +16,10 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using NPOI.HSSF.UserModel;
 using NPOI.SS.UserModel;
+using NPOI.SS.Util;
 using NPOI.Util;
 using NPOI.XSSF.UserModel;
 
@@ -22,15 +27,27 @@ namespace ExcelTimetableGenerator.Pages
 {
     public class ExportTimetablesModel : PageModel
     {
-        private readonly ExcelTimetableGenerator.Data.ApplicationDbContext _context;
+        private readonly ApplicationDbContext _context;
+        private readonly IConfiguration _configuration;
         private IHostingEnvironment _hostingEnvironment;
-        public ExportTimetablesModel(ExcelTimetableGenerator.Data.ApplicationDbContext context, IHostingEnvironment hostingEnvironment)
+        public ExportTimetablesModel(
+            ApplicationDbContext context,
+            IConfiguration configuration,
+            IHostingEnvironment hostingEnvironment
+            )
         {
             _context = context;
+            _configuration = configuration;
             _hostingEnvironment = hostingEnvironment;
         }
 
+        public string AcademicYear { get; set; }
+        public string UserDetails { get; set; }
+        public string UserGreeting { get; set; }
+        public string SystemVersion { get; set; }
+
         public string SavePath { get; set; }
+        public string ZipPath { get; set; }
 
         public int NumFilesExported { get; set; }
 
@@ -42,25 +59,49 @@ namespace ExcelTimetableGenerator.Pages
         public IList<Time> Time { get; set; }
         public IList<TimetableSection> TimetableSection { get; set; }
 
-        public async Task<IActionResult> OnGetAsync(string academicYear, int planRevisionID)
+        public IList<Week> Week { get; set; }
+        public IList<TermDate> TermDate { get; set; }
+        public IList<BankHoliday> BankHoliday { get; set; }
+
+        public async Task<IActionResult> OnGetAsync(string academicYear, int plan, string course)
         {
-            planRevisionID = 66;
+            int planRevisionID = 0;
+
+            if (plan >= 1)
+            {
+                planRevisionID = plan;
+            }
+            else
+            {
+                planRevisionID = int.Parse(_configuration.GetSection("ProResource")["PlanRevisionID"]);
+            }
+
+            AcademicYear = await AcademicYearFunctions.GetAcademicYear(academicYear, _context);
+
+            UserDetails = await Identity.GetFullName(academicYear, User.Identity.Name.Split('\\').Last(), _context);
+
+            UserGreeting = Identity.GetGreeting();
+
+            SystemVersion = _configuration["Version"];
 
             string CurrentAcademicYear = await AcademicYearFunctions.GetAcademicYear(academicYear, _context);
             var academicYearParam = new SqlParameter("@AcademicYear", CurrentAcademicYear);
             var planRevisionIDParam = new SqlParameter("@PlanRevisionID", planRevisionID);
+            var courseParam = new SqlParameter("@Course", SqlDbType.NVarChar);
+            courseParam.Value = (object)course ?? DBNull.Value;
+
 
             //Data from Curriculum Planning
             Course = await _context.Course
-                .FromSql("EXEC SPR_ETG_CourseData @AcademicYear, @PlanRevisionID", academicYearParam, planRevisionIDParam)
+                .FromSql("EXEC SPR_ETG_CourseData @AcademicYear, @PlanRevisionID, @Course", academicYearParam, planRevisionIDParam, courseParam)
                 .ToListAsync();
 
             Group = await _context.Group
-                .FromSql("EXEC SPR_ETG_GroupData @AcademicYear, @PlanRevisionID", academicYearParam, planRevisionIDParam)
+                .FromSql("EXEC SPR_ETG_GroupData @AcademicYear, @PlanRevisionID, @Course", academicYearParam, planRevisionIDParam, courseParam)
                 .ToListAsync();
 
             Programme = await _context.Programme
-                .FromSql("EXEC SPR_ETG_ProgrammeData @AcademicYear, @PlanRevisionID", academicYearParam, planRevisionIDParam)
+                .FromSql("EXEC SPR_ETG_ProgrammeData @AcademicYear, @PlanRevisionID, @Course", academicYearParam, planRevisionIDParam, courseParam)
                 .ToListAsync();
 
             //Data for Tiemtable Grid
@@ -76,11 +117,25 @@ namespace ExcelTimetableGenerator.Pages
                 .FromSql("EXEC SPR_ETG_TimetableSection")
                 .ToListAsync();
 
+            Week = await _context.Week
+                .FromSql("EXEC SPR_ETG_Week")
+                .ToListAsync();
+
+            TermDate = await _context.TermDate
+                .FromSql("EXEC SPR_ETG_TermDate")
+                .ToListAsync();
+
+            BankHoliday = await _context.BankHoliday
+                .FromSql("EXEC SPR_ETG_BankHoliday")
+                .ToListAsync();
+
             SavePath = _hostingEnvironment.WebRootPath + @"\ExportedTimetables";
+            ZipPath = _hostingEnvironment.WebRootPath + @"\Output";
             string filePath = null;
             string fileName = null;
             string fileURL = null;
             int rowNum = 0;
+            int startAtRowNum = 0;
             int colNum = 0;
             NumFilesExported = 0;
 
@@ -90,16 +145,15 @@ namespace ExcelTimetableGenerator.Pages
             collegeLogoStream.Close();
             collegeLogoStream.Dispose();
 
-            foreach (var programme in Programme)
-            {
-                NumFilesExported += 1;
 
-                //Save timetables into departmental and team folders (creates a folder if it doesn't exist)
-                filePath = SavePath + @"\" + programme.FacCode + @"\" + programme.TeamCode + @"\";
+            //Create Master Excel Programme List
+            if (Programme != null && Programme.Count > 0)
+            {
+                filePath = SavePath + @"\";
                 Directory.CreateDirectory(filePath);
 
                 //Generate each Excel workbook
-                fileName = @"" + programme.ProgCode + " - " + programme.ProgTitle + ".xlsx";
+                fileName = @"Master List.xlsx";
                 fileName = FileFunctions.MakeValidFileName(fileName); //Sanitize
                 fileURL = string.Format("{0}://{1}/{2}", Request.Scheme, Request.Host, fileName);
                 FileInfo file = new FileInfo(Path.Combine(filePath, fileName));
@@ -110,6 +164,7 @@ namespace ExcelTimetableGenerator.Pages
                     ISheet sheet;
                     IRow row;
                     ICell cell;
+                    CellRangeAddress region;
                     IDrawing drawing;
                     IClientAnchor anchor;
                     IPicture picture;
@@ -119,6 +174,7 @@ namespace ExcelTimetableGenerator.Pages
 
                     //For date formatting
                     ICreationHelper createHelper = workbook.GetCreationHelper();
+                    IHyperlink link = createHelper.CreateHyperlink(HyperlinkType.Url);
 
                     //Cell formats
                     CellType ctString = CellType.String;
@@ -128,16 +184,11 @@ namespace ExcelTimetableGenerator.Pages
 
                     //Cell Colours
                     XSSFColor cLightBlue = new XSSFColor(Color.LightSteelBlue);
-                    XSSFColor cBlue = new XSSFColor(Color.RoyalBlue);
-                    XSSFColor cMainAim = new XSSFColor(Color.Yellow);
-                    XSSFColor cEngMaths = new XSSFColor(Color.PaleGreen);
-                    XSSFColor cWex = new XSSFColor(Color.Plum);
-                    XSSFColor cDSS = new XSSFColor(Color.Lavender);
-                    XSSFColor cTut = new XSSFColor(Color.LightCyan);
-                    XSSFColor cOther = new XSSFColor(Color.NavajoWhite);
+                    XSSFColor cReturned = new XSSFColor(Color.Yellow);
 
                     //Cell Borders
-                    BorderStyle border = BorderStyle.Medium;
+                    BorderStyle bLight = BorderStyle.Thin;
+                    BorderStyle bMedium = BorderStyle.Medium;
 
                     //Fonts
                     //Header
@@ -164,580 +215,2176 @@ namespace ExcelTimetableGenerator.Pages
                     //Page Subheader
                     XSSFCellStyle sSubHeader = (XSSFCellStyle)workbook.CreateCellStyle();
                     sHeader.SetFont(fSubHeader);
+                    sHeader.SetFont(fBold);
 
                     //Table Header
                     XSSFCellStyle sTableHeader = (XSSFCellStyle)workbook.CreateCellStyle();
                     sTableHeader.SetFont(fBold);
                     sTableHeader.SetFillForegroundColor(cLightBlue);
                     sTableHeader.FillPattern = FillPattern.SolidForeground;
-                    sTableHeader.BorderTop = border;
-                    sTableHeader.BorderBottom = border;
-                    sTableHeader.BorderLeft = border;
-                    sTableHeader.BorderRight = border;
+                    sTableHeader.BorderTop = bMedium;
+                    sTableHeader.BorderBottom = bMedium;
+                    sTableHeader.BorderLeft = bMedium;
+                    sTableHeader.BorderRight = bMedium;
                     sTableHeader.WrapText = true;
 
-                    //Date
-                    XSSFCellStyle sDate = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
-                    sDate.BorderTop = border;
-                    sDate.BorderBottom = border;
-                    sDate.BorderLeft = border;
-                    sDate.BorderRight = border;
+                    XSSFCellStyle sReturned = (XSSFCellStyle)workbook.CreateCellStyle();
+                    sReturned.SetFont(fBold);
+                    sReturned.SetFillForegroundColor(cReturned);
+                    sReturned.FillPattern = FillPattern.SolidForeground;
+                    sReturned.BorderTop = bMedium;
+                    sReturned.BorderBottom = bMedium;
+                    sReturned.BorderLeft = bMedium;
+                    sReturned.BorderRight = bMedium;
 
-                    //Types of courses
-                    XSSFCellStyle sMainAim = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sMainAim.SetFillForegroundColor(cMainAim);
-                    sMainAim.FillPattern = FillPattern.SolidForeground;
-                    sMainAim.BorderTop = border;
-                    sMainAim.BorderBottom = border;
-                    sMainAim.BorderLeft = border;
-                    sMainAim.BorderRight = border;
-                    sMainAim.SetFont(fBold);
+                    //Border only
+                    XSSFCellStyle sBorderMedium = (XSSFCellStyle)workbook.CreateCellStyle();
+                    sBorderMedium.BorderTop = bMedium;
+                    sBorderMedium.BorderBottom = bMedium;
+                    sBorderMedium.BorderLeft = bMedium;
+                    sBorderMedium.BorderRight = bMedium;
 
-                    XSSFCellStyle sEngMaths = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sEngMaths.SetFillForegroundColor(cEngMaths);
-                    sEngMaths.FillPattern = FillPattern.SolidForeground;
-                    sEngMaths.BorderTop = border;
-                    sEngMaths.BorderBottom = border;
-                    sEngMaths.BorderLeft = border;
-                    sEngMaths.BorderRight = border;
-
-                    XSSFCellStyle sWex = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sWex.SetFillForegroundColor(cWex);
-                    sWex.FillPattern = FillPattern.SolidForeground;
-                    sWex.BorderTop = border;
-                    sWex.BorderBottom = border;
-                    sWex.BorderLeft = border;
-                    sWex.BorderRight = border;
-
-                    XSSFCellStyle sDSS = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sDSS.SetFillForegroundColor(cDSS);
-                    sDSS.FillPattern = FillPattern.SolidForeground;
-                    sDSS.BorderTop = border;
-                    sDSS.BorderBottom = border;
-                    sDSS.BorderLeft = border;
-                    sDSS.BorderRight = border;
-
-                    XSSFCellStyle sTut = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sTut.SetFillForegroundColor(cTut);
-                    sTut.FillPattern = FillPattern.SolidForeground;
-                    sTut.BorderTop = border;
-                    sTut.BorderBottom = border;
-                    sTut.BorderLeft = border;
-                    sTut.BorderRight = border;
-
-                    XSSFCellStyle sOther = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sOther.SetFillForegroundColor(cOther);
-                    sOther.FillPattern = FillPattern.SolidForeground;
-                    sOther.BorderTop = border;
-                    sOther.BorderBottom = border;
-                    sOther.BorderLeft = border;
-                    sOther.BorderRight = border;
-
-                    //Border Only
-                    XSSFCellStyle sBorder = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sBorder.BorderTop = border;
-                    sBorder.BorderBottom = border;
-                    sBorder.BorderLeft = border;
-                    sBorder.BorderRight = border;
-
-                    //Types of courses (date fields
-                    XSSFCellStyle sMainAimDate = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sMainAimDate.SetFillForegroundColor(cMainAim);
-                    sMainAimDate.FillPattern = FillPattern.SolidForeground;
-                    sMainAimDate.BorderTop = border;
-                    sMainAimDate.BorderBottom = border;
-                    sMainAimDate.BorderLeft = border;
-                    sMainAimDate.BorderRight = border;
-                    sMainAimDate.SetFont(fBold);
-                    sMainAimDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
-
-                    XSSFCellStyle sEngMathsDate = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sEngMathsDate.SetFillForegroundColor(cEngMaths);
-                    sEngMathsDate.FillPattern = FillPattern.SolidForeground;
-                    sEngMathsDate.BorderTop = border;
-                    sEngMathsDate.BorderBottom = border;
-                    sEngMathsDate.BorderLeft = border;
-                    sEngMathsDate.BorderRight = border;
-                    sEngMathsDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
-
-                    XSSFCellStyle sWexDate = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sWexDate.SetFillForegroundColor(cWex);
-                    sWexDate.FillPattern = FillPattern.SolidForeground;
-                    sWexDate.BorderTop = border;
-                    sWexDate.BorderBottom = border;
-                    sWexDate.BorderLeft = border;
-                    sWexDate.BorderRight = border;
-                    sWexDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
-
-                    XSSFCellStyle sDSSDate = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sDSSDate.SetFillForegroundColor(cDSS);
-                    sDSSDate.FillPattern = FillPattern.SolidForeground;
-                    sDSSDate.BorderTop = border;
-                    sDSSDate.BorderBottom = border;
-                    sDSSDate.BorderLeft = border;
-                    sDSSDate.BorderRight = border;
-                    sDSSDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
-
-                    XSSFCellStyle sTutDate = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sTutDate.SetFillForegroundColor(cTut);
-                    sTutDate.FillPattern = FillPattern.SolidForeground;
-                    sTutDate.BorderTop = border;
-                    sTutDate.BorderBottom = border;
-                    sTutDate.BorderLeft = border;
-                    sTutDate.BorderRight = border;
-                    sTutDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
-
-                    XSSFCellStyle sOtherDate = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sOtherDate.SetFillForegroundColor(cOther);
-                    sOtherDate.FillPattern = FillPattern.SolidForeground;
-                    sOtherDate.BorderTop = border;
-                    sOtherDate.BorderBottom = border;
-                    sOtherDate.BorderLeft = border;
-                    sOtherDate.BorderRight = border;
-                    sOtherDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
-
-                    //Border Only
                     XSSFCellStyle sBorderDate = (XSSFCellStyle)workbook.CreateCellStyle();
-                    sBorderDate.BorderTop = border;
-                    sBorderDate.BorderBottom = border;
-                    sBorderDate.BorderLeft = border;
-                    sBorderDate.BorderRight = border;
+                    sBorderDate.BorderTop = bMedium;
+                    sBorderDate.BorderBottom = bMedium;
+                    sBorderDate.BorderLeft = bMedium;
+                    sBorderDate.BorderRight = bMedium;
                     sBorderDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
 
                     //Create Index Sheet
-                    sheet = workbook.CreateSheet("Index");
+                    sheet = workbook.CreateSheet("Master List");
                     row = sheet.CreateRow(0);
                     row.Height = 1000;
 
                     //Insert College Logo (to right) - second col/row must be greater otherwise nothing appears
                     drawing = sheet.CreateDrawingPatriarch();
                     anchor = createHelper.CreateClientAnchor();
-                    anchor.Col1 = 11;
+                    anchor.Col1 = 9;
                     anchor.Row1 = 0;
-                    anchor.Col2 = 13;
+                    anchor.Col2 = 11;
                     anchor.Row2 = 1;
                     picture = drawing.CreatePicture(anchor, collegeLogo);
 
                     cell = row.CreateCell(0);
-                    
-                    cell.SetCellValue(programme.ProgCode + " - " + programme.ProgTitle);
+
+                    cell.SetCellValue("Master List of Programmes from ProResource for " + CurrentAcademicYear);
                     cell.CellStyle = sHeader;
+
+                    //Merge header row
+                    region = CellRangeAddress.ValueOf("A1:I1");
+                    sheet.AddMergedRegion(region);
 
                     row = sheet.CreateRow(1);
 
                     row = sheet.CreateRow(2);
 
                     cell = row.CreateCell(0, ctString);
-                    cell.SetCellValue("Course Code");
-                    cell.CellStyle = sTableHeader;
-
-                    cell = row.CreateCell(1, ctString);
-                    cell.SetCellValue("Course Title");
-                    cell.CellStyle = sTableHeader;
-
-                    cell = row.CreateCell(2, ctString);
-                    cell.SetCellValue("Qual");
-                    cell.CellStyle = sTableHeader;
-
-                    cell = row.CreateCell(3, ctString);
-                    cell.SetCellValue("Award Body");
-                    cell.CellStyle = sTableHeader;
-
-                    cell = row.CreateCell(4, ctString);
-                    cell.SetCellValue("Hours Per Week");
-                    cell.CellStyle = sTableHeader;
-
-                    cell = row.CreateCell(5, ctString);
-                    cell.SetCellValue("Length in Weeks");
-                    cell.CellStyle = sTableHeader;
-
-                    cell = row.CreateCell(6, ctString);
-                    cell.SetCellValue("Planned Learning Hours 16-18");
-                    cell.CellStyle = sTableHeader;
-
-                    cell = row.CreateCell(7, ctString);
-                    cell.SetCellValue("Planned EEP Hours 16-18");
-                    cell.CellStyle = sTableHeader;
-
-                    cell = row.CreateCell(8, ctString);
-                    cell.SetCellValue("Planned Learning Hours 19+");
-                    cell.CellStyle = sTableHeader;
-
-                    cell = row.CreateCell(9, ctString);
-                    cell.SetCellValue("Planned EEP Hours 19+");
-                    cell.CellStyle = sTableHeader;
-
-                    cell = row.CreateCell(10, ctString);
-                    cell.SetCellValue("Start Date");
-                    cell.CellStyle = sTableHeader;
-
-                    cell = row.CreateCell(11, ctString);
-                    cell.SetCellValue("End Date");
-                    cell.CellStyle = sTableHeader;
-
-                    cell = row.CreateCell(12, ctString);
                     cell.SetCellValue("Site");
                     cell.CellStyle = sTableHeader;
 
-                    cell = row.CreateCell(13, ctString);
-                    cell.SetCellValue("Notes");
+                    cell = row.CreateCell(1, ctString);
+                    cell.SetCellValue("Fac Code");
+                    cell.CellStyle = sTableHeader;
+
+                    cell = row.CreateCell(2, ctString);
+                    cell.SetCellValue("Fac Name");
+                    cell.CellStyle = sTableHeader;
+
+                    cell = row.CreateCell(3, ctString);
+                    cell.SetCellValue("Team Code");
+                    cell.CellStyle = sTableHeader;
+
+                    cell = row.CreateCell(4, ctString);
+                    cell.SetCellValue("Team Name");
+                    cell.CellStyle = sTableHeader;
+
+                    cell = row.CreateCell(5, ctString);
+                    cell.SetCellValue("Prog Code");
+                    cell.CellStyle = sTableHeader;
+
+                    cell = row.CreateCell(6, ctString);
+                    cell.SetCellValue("Prog Title");
+                    cell.CellStyle = sTableHeader;
+
+                    cell = row.CreateCell(7, ctString);
+                    cell.SetCellValue("Mode of Attendance");
+                    cell.CellStyle = sTableHeader;
+
+                    cell = row.CreateCell(8, ctString);
+                    cell.SetCellValue("Status");
+                    cell.CellStyle = sTableHeader;
+
+                    cell = row.CreateCell(9, ctString);
+                    cell.SetCellValue("Num Courses");
+                    cell.CellStyle = sTableHeader;
+
+                    cell = row.CreateCell(10, ctString);
+                    cell.SetCellValue("Returned");
                     cell.CellStyle = sTableHeader;
 
                     //Column widths
                     sheet.SetColumnWidth(0, 16 * 256);
-                    sheet.SetColumnWidth(1, 40 * 256);
-                    sheet.SetColumnWidth(2, 14 * 256);
-                    sheet.SetColumnWidth(3, 12 * 256);
-                    sheet.SetColumnWidth(4, 8 * 256);
-                    sheet.SetColumnWidth(5, 8 * 256);
-                    sheet.SetColumnWidth(6, 10 * 256);
-                    sheet.SetColumnWidth(7, 10 * 256);
-                    sheet.SetColumnWidth(8, 10 * 256);
-                    sheet.SetColumnWidth(9, 10 * 256);
-                    sheet.SetColumnWidth(10, 12 * 256);
-                    sheet.SetColumnWidth(11, 12 * 256);
-                    sheet.SetColumnWidth(12, 20 * 256);
-                    sheet.SetColumnWidth(13, 20 * 256);
-                    sheet.SetColumnWidth(14, 20 * 256);
+                    sheet.SetColumnWidth(1, 8 * 256);
+                    sheet.SetColumnWidth(2, 20 * 256);
+                    sheet.SetColumnWidth(3, 8 * 256);
+                    sheet.SetColumnWidth(4, 20 * 256);
+                    sheet.SetColumnWidth(5, 16 * 256);
+                    sheet.SetColumnWidth(6, 60 * 256);
+                    sheet.SetColumnWidth(7, 16 * 256);
+                    sheet.SetColumnWidth(8, 20 * 256);
+                    sheet.SetColumnWidth(9, 8 * 256);
+                    sheet.SetColumnWidth(10, 10 * 256);
 
                     //The current row in the worksheet
                     rowNum = 2;
+                    string progFileName = null;
+                    string progFolder = null;
+                    string progFileURL = null;
 
-                    //Generate each Excel worksheet
-                    if (programme.Course != null && programme.Course.Count > 0)
-                    {
-                        foreach (var course in programme.Course)
-                        {
-                            rowNum += 1;
-                            row = sheet.CreateRow(rowNum);
-                            XSSFCellStyle cellStyle;
-                            XSSFCellStyle cellStyleDate;
-
-                            switch(course.CourseOrder)
-                            {
-                                case 0:
-                                    cellStyle = sOther;
-                                    cellStyleDate = sOtherDate;
-                                    break;
-                                case 1:
-                                    cellStyle = sMainAim;
-                                    cellStyleDate = sMainAimDate;
-                                    break;
-                                case 2:
-                                    cellStyle = sOther;
-                                    cellStyleDate = sOtherDate;
-                                    break;
-                                case 3:
-                                    cellStyle = sEngMaths;
-                                    cellStyleDate = sEngMathsDate;
-                                    break;
-                                case 4:
-                                    cellStyle = sEngMaths;
-                                    cellStyleDate = sEngMathsDate;
-                                    break;
-                                case 5:
-                                    cellStyle = sTut;
-                                    cellStyleDate = sTutDate;
-                                    break;
-                                case 6:
-                                    cellStyle = sWex;
-                                    cellStyleDate = sWexDate;
-                                    break;
-                                case 7:
-                                    cellStyle = sDSS;
-                                    cellStyleDate = sDSSDate;
-                                    break;
-                                case 8:
-                                    cellStyle = sOther;
-                                    cellStyleDate = sOtherDate;
-                                    break;
-                                default:
-                                    cellStyle = sMainAim;
-                                    cellStyleDate = sMainAimDate;
-                                    break;
-                            }
-
-                            cell = row.CreateCell(0, ctString);
-                            cell.SetCellValue(course.CourseCode);
-                            cell.CellStyle = cellStyle;
-
-                            cell = row.CreateCell(1, ctString);
-                            cell.SetCellValue(course.CourseTitle);
-                            cell.CellStyle = cellStyle;
-
-                            cell = row.CreateCell(2, ctString);
-                            cell.SetCellValue(course.AimCode);
-                            cell.CellStyle = cellStyle;
-
-                            cell = row.CreateCell(3, ctString);
-                            cell.SetCellValue(course.AwardBody);
-                            cell.CellStyle = cellStyle;
-
-                            cell = row.CreateCell(4, ctNumber);
-                            if(course.HoursPerWeek >= 0)
-                            {
-                                cell.SetCellValue((double)course.HoursPerWeek);
-                            }
-                            cell.CellStyle = cellStyle;
-
-                            cell = row.CreateCell(5, ctNumber);
-                            if (course.Weeks >= 0)
-                            {
-                                cell.SetCellValue((double)course.Weeks);
-                            }
-                            cell.CellStyle = cellStyle;
-
-                            cell = row.CreateCell(6, ctNumber);
-                            if (course.PLH1618 >= 0)
-                            {
-                                cell.SetCellValue((double)course.PLH1618);
-                            }
-                            cell.CellStyle = cellStyle;
-
-                            cell = row.CreateCell(7, ctNumber);
-                            if (course.EEP1618 >= 0)
-                            {
-                                cell.SetCellValue((double)course.EEP1618);
-                            }
-                            cell.CellStyle = cellStyle;
-
-                            cell = row.CreateCell(8, ctNumber);
-                            if (course.PLH19 >= 0)
-                            {
-                                cell.SetCellValue((double)course.PLH19);
-                            }
-                            cell.CellStyle = cellStyle;
-
-                            cell = row.CreateCell(9, ctNumber);
-                            if (course.EEP19 >= 0)
-                            {
-                                cell.SetCellValue((double)course.EEP19);
-                            }
-                            cell.CellStyle = cellStyle;
-
-                            cell = row.CreateCell(10, ctNumber);
-                            cell.CellStyle = cellStyleDate;
-                            cell.SetCellValue((DateTime)course.StartDate);
-
-                            cell = row.CreateCell(11, ctNumber);
-                            cell.CellStyle = cellStyleDate;
-                            cell.SetCellValue((DateTime)course.EndDate);
-
-                            cell = row.CreateCell(12, ctString);
-                            cell.SetCellValue(course.SiteName);
-                            cell.CellStyle = cellStyle;
-
-                            cell = row.CreateCell(13, ctString);
-                            cell.SetCellValue(course.Notes);
-                            cell.CellStyle = cellStyle;
-                        }
-
-                        ////Set widths(does not seem to work very well)
-                        //int numberOfColumns = indexSheet.GetRow(4).PhysicalNumberOfCells;
-                        //for (int i = 1; i <= numberOfColumns; i++)
-                        //{
-                        //    indexSheet.AutoSizeColumn(i);
-                        //    GC.Collect(); // Add this line
-                        //}
-                    }
-                    else
+                    foreach (var programme in Programme)
                     {
                         rowNum += 1;
                         row = sheet.CreateRow(rowNum);
 
+                        progFileName = FileFunctions.MakeValidFileName(programme.ProgCode + @" - " + programme.ProgTitle + @".xlsx"); //Sanitize
+                        progFolder = @"/ExportedTimetables/" + programme.FacCode + @"/" + programme.TeamCode + @"/";
+                        progFileURL = string.Format("{0}://{1}/{2}", Request.Scheme, Request.Host, progFolder + progFileName).Replace(" ", "%20");
+                        link.Address = progFileURL;
+
                         cell = row.CreateCell(0, ctString);
-                        cell.CellStyle = sHeader;
-                        cell.SetCellValue("Error - No courses could be loaded. Please check CourseData Stored Procedure");
+                        cell.SetCellValue(programme.SiteName);
+                        cell.CellStyle = sBorderMedium;
+
+                        cell = row.CreateCell(1, ctString);
+                        cell.SetCellValue(programme.FacCode);
+                        cell.CellStyle = sBorderMedium;
+
+                        cell = row.CreateCell(2, ctString);
+                        cell.SetCellValue(programme.FacName);
+                        cell.CellStyle = sBorderMedium;
+
+                        cell = row.CreateCell(3, ctString);
+                        cell.SetCellValue(programme.TeamCode);
+                        cell.CellStyle = sBorderMedium;
+
+                        cell = row.CreateCell(4, ctString);
+                        cell.SetCellValue(programme.TeamName);
+                        cell.CellStyle = sBorderMedium;
+
+                        cell = row.CreateCell(5, ctString);
+                        cell.SetCellValue(programme.ProgCode);
+                        cell.CellStyle = sBorderMedium;
+                        cell.Hyperlink = link;
+
+                        cell = row.CreateCell(6, ctString);
+                        cell.SetCellValue(programme.ProgTitle);
+                        cell.CellStyle = sBorderMedium;
+                        cell.Hyperlink = link;
+
+                        cell = row.CreateCell(7, ctString);
+                        cell.SetCellValue(programme.ModeOfAttendanceName);
+                        cell.CellStyle = sBorderMedium;
+
+                        cell = row.CreateCell(8, ctString);
+                        cell.SetCellValue(programme.ProgStatus);
+                        cell.CellStyle = sBorderMedium;
+
+                        cell = row.CreateCell(9, ctNumber);
+                        if (programme.Course != null && programme.Course.Count > 0)
+                        {
+                            cell.SetCellValue(programme.Course.Count);
+                        }
+                        else
+                        {
+                            cell.SetCellValue(0);
+                        }
+                        cell.CellStyle = sBorderMedium;
+
+                        cell = row.CreateCell(10, ctBlank);
+                        cell.CellStyle = sReturned;
                     }
 
-                    
+                    workbook.Write(fs);
 
-                    if (programme.Group != null && programme.Group.Count > 0)
+                    using (var stream = new FileStream(Path.Combine(filePath, fileName), FileMode.Open))
                     {
-                        foreach (var group in programme.Group)
+                        await stream.CopyToAsync(memory);
+                    }
+                    memory.Position = 0;
+                }
+            }
+
+            //Create Excel file for each programme
+            if (Programme != null && Programme.Count > 0)
+            {
+                foreach (var programme in Programme)
+                {
+                    NumFilesExported += 1;
+
+                    //Save timetables into departmental and team folders (creates a folder if it doesn't exist)
+                    filePath = SavePath + @"\" + programme.FacCode + @"\" + programme.TeamCode + @"\";
+                    Directory.CreateDirectory(filePath);
+
+                    //Generate each Excel workbook
+                    fileName = @"" + programme.ProgCode + " - " + programme.ProgTitle + ".xlsx";
+                    fileName = FileFunctions.MakeValidFileName(fileName); //Sanitize
+                    fileURL = string.Format("{0}://{1}/{2}", Request.Scheme, Request.Host, fileName);
+                    FileInfo file = new FileInfo(Path.Combine(filePath, fileName));
+                    var memory = new MemoryStream();
+                    using (var fs = new FileStream(Path.Combine(filePath, fileName), FileMode.Create, FileAccess.Write))
+                    {
+                        IWorkbook workbook = new XSSFWorkbook();
+                        ISheet sheet;
+                        IRow row;
+                        ICell cell;
+                        CellRangeAddress region;
+                        IDrawing drawing;
+                        IClientAnchor anchor;
+                        IPicture picture;
+
+                        //Add college logo
+                        int collegeLogo = workbook.AddPicture(bytes, PictureType.PNG);
+
+                        //For date formatting
+                        ICreationHelper createHelper = workbook.GetCreationHelper();
+
+                        //Cell formats
+                        CellType ctString = CellType.String;
+                        CellType ctNumber = CellType.Numeric;
+                        CellType ctFormula = CellType.Formula;
+                        CellType ctBlank = CellType.Blank;
+
+                        //Cell Colours
+                        XSSFColor cLightBlue = new XSSFColor(Color.LightSteelBlue);
+                        XSSFColor cBlue = new XSSFColor(Color.RoyalBlue);
+                        XSSFColor cMainAim = new XSSFColor(Color.Yellow);
+                        XSSFColor cEngMaths = new XSSFColor(Color.PaleGreen);
+                        XSSFColor cWex = new XSSFColor(Color.Plum);
+                        XSSFColor cDSS = new XSSFColor(Color.Lavender);
+                        XSSFColor cTut = new XSSFColor(Color.LightCyan);
+                        XSSFColor cOther = new XSSFColor(Color.NavajoWhite);
+
+                        XSSFColor cEarlySlots = new XSSFColor(Color.LavenderBlush);
+                        XSSFColor cLateSlots = new XSSFColor(Color.Lavender);
+                        XSSFColor cWeeklyHours = new XSSFColor(Color.Honeydew);
+
+                        //Cell Borders
+                        BorderStyle bLight = BorderStyle.Thin;
+                        BorderStyle bMedium = BorderStyle.Medium;
+
+                        //Fonts
+                        //Header
+                        IFont fHeader = workbook.CreateFont();
+                        fHeader.FontHeight = 20;
+                        fHeader.FontName = "Arial";
+                        fHeader.IsBold = true;
+
+                        //Sub-header
+                        IFont fSubHeader = workbook.CreateFont();
+                        fSubHeader.FontHeight = 14;
+                        fSubHeader.FontName = "Arial";
+                        fSubHeader.IsBold = true;
+
+                        //Table Header
+                        IFont fBold = workbook.CreateFont();
+                        fBold.IsBold = true;
+
+                        //Cell formats
+                        //Page Header
+                        XSSFCellStyle sHeader = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sHeader.SetFont(fHeader);
+
+                        //Page Subheader
+                        XSSFCellStyle sSubHeader = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sHeader.SetFont(fSubHeader);
+                        sHeader.SetFont(fBold);
+
+                        //Table Header
+                        XSSFCellStyle sTableHeader = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sTableHeader.SetFont(fBold);
+                        sTableHeader.SetFillForegroundColor(cLightBlue);
+                        sTableHeader.FillPattern = FillPattern.SolidForeground;
+                        sTableHeader.BorderTop = bMedium;
+                        sTableHeader.BorderBottom = bMedium;
+                        sTableHeader.BorderLeft = bMedium;
+                        sTableHeader.BorderRight = bMedium;
+                        sTableHeader.WrapText = true;
+
+                        XSSFCellStyle sTableHeaderCenter = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sTableHeaderCenter.SetFont(fBold);
+                        sTableHeaderCenter.SetFillForegroundColor(cLightBlue);
+                        sTableHeaderCenter.FillPattern = FillPattern.SolidForeground;
+                        sTableHeaderCenter.Alignment = HorizontalAlignment.Center;
+                        sTableHeaderCenter.BorderTop = bMedium;
+                        sTableHeaderCenter.BorderBottom = bMedium;
+                        sTableHeaderCenter.BorderLeft = bMedium;
+                        sTableHeaderCenter.BorderRight = bMedium;
+                        sTableHeaderCenter.WrapText = true;
+
+                        //Date
+                        XSSFCellStyle sDate = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
+                        sDate.BorderTop = bMedium;
+                        sDate.BorderBottom = bMedium;
+                        sDate.BorderLeft = bMedium;
+                        sDate.BorderRight = bMedium;
+
+                        //Rotated
+                        XSSFCellStyle sRotated = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sRotated.Rotation = 90;
+                        sRotated.BorderTop = bMedium;
+                        sRotated.BorderBottom = bMedium;
+                        sRotated.BorderLeft = bMedium;
+                        sRotated.BorderRight = bMedium;
+
+                        //Merged Centred
+                        XSSFCellStyle sMergedCentredTotal = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sMergedCentredTotal.SetFont(fBold);
+                        sMergedCentredTotal.Alignment = HorizontalAlignment.Center;
+                        sMergedCentredTotal.VerticalAlignment = VerticalAlignment.Center;
+                        sMergedCentredTotal.BorderTop = bLight;
+                        sMergedCentredTotal.BorderBottom = bLight;
+                        sMergedCentredTotal.BorderLeft = bLight;
+                        sMergedCentredTotal.BorderRight = bLight;
+
+                        XSSFCellStyle sWeeklyHours = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sWeeklyHours.SetFont(fBold);
+                        sWeeklyHours.SetFillForegroundColor(cWeeklyHours);
+                        sWeeklyHours.FillPattern = FillPattern.SolidForeground;
+                        sWeeklyHours.Alignment = HorizontalAlignment.Center;
+                        sWeeklyHours.VerticalAlignment = VerticalAlignment.Center;
+                        sWeeklyHours.BorderTop = bLight;
+                        sWeeklyHours.BorderBottom = bLight;
+                        sWeeklyHours.BorderLeft = bLight;
+                        sWeeklyHours.BorderRight = bLight;
+
+                        //Merged Right
+                        XSSFCellStyle sMergedRightTotal = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sMergedRightTotal.SetFont(fBold);
+                        sMergedRightTotal.Alignment = HorizontalAlignment.Right;
+                        sMergedRightTotal.VerticalAlignment = VerticalAlignment.Center;
+                        sMergedRightTotal.BorderTop = bLight;
+                        sMergedRightTotal.BorderBottom = bLight;
+                        sMergedRightTotal.BorderLeft = bLight;
+                        sMergedRightTotal.BorderRight = bLight;
+
+                        //Table Header (Rotated)
+                        XSSFCellStyle sTableHeaderLightRotated = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sTableHeaderLightRotated.SetFont(fBold);
+                        sTableHeaderLightRotated.SetFillForegroundColor(cLightBlue);
+                        sTableHeaderLightRotated.FillPattern = FillPattern.SolidForeground;
+                        sTableHeaderLightRotated.Rotation = 90;
+                        sTableHeaderLightRotated.Alignment = HorizontalAlignment.Center;
+                        sTableHeaderLightRotated.BorderTop = bLight;
+                        sTableHeaderLightRotated.BorderBottom = bLight;
+                        sTableHeaderLightRotated.BorderLeft = bLight;
+                        sTableHeaderLightRotated.BorderRight = bLight;
+
+                        XSSFCellStyle sTableHeaderRotated = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sTableHeaderRotated.SetFont(fBold);
+                        sTableHeaderRotated.SetFillForegroundColor(cLightBlue);
+                        sTableHeaderRotated.FillPattern = FillPattern.SolidForeground;
+                        sTableHeaderRotated.Rotation = 90;
+                        sTableHeaderRotated.BorderTop = bMedium;
+                        sTableHeaderRotated.BorderBottom = bMedium;
+                        sTableHeaderRotated.BorderLeft = bMedium;
+                        sTableHeaderRotated.BorderRight = bMedium;
+
+                        XSSFCellStyle sTableHeaderCenterRotated = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sTableHeaderCenterRotated.SetFont(fBold);
+                        sTableHeaderCenterRotated.SetFillForegroundColor(cLightBlue);
+                        sTableHeaderCenterRotated.FillPattern = FillPattern.SolidForeground;
+                        sTableHeaderCenterRotated.Rotation = 90;
+                        sTableHeaderCenterRotated.Alignment = HorizontalAlignment.Center;
+                        sTableHeaderCenterRotated.BorderTop = bMedium;
+                        sTableHeaderCenterRotated.BorderBottom = bMedium;
+                        sTableHeaderCenterRotated.BorderLeft = bMedium;
+                        sTableHeaderCenterRotated.BorderRight = bMedium;
+
+                        XSSFCellStyle sTotalRight = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sTotalRight.SetFont(fBold);
+                        sTotalRight.Alignment = HorizontalAlignment.Right;
+
+                        //Types of courses
+                        XSSFCellStyle sMainAim = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sMainAim.SetFillForegroundColor(cMainAim);
+                        sMainAim.FillPattern = FillPattern.SolidForeground;
+                        sMainAim.BorderTop = bMedium;
+                        sMainAim.BorderBottom = bMedium;
+                        sMainAim.BorderLeft = bMedium;
+                        sMainAim.BorderRight = bMedium;
+                        sMainAim.SetFont(fBold);
+
+                        XSSFCellStyle sEngMaths = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sEngMaths.SetFillForegroundColor(cEngMaths);
+                        sEngMaths.FillPattern = FillPattern.SolidForeground;
+                        sEngMaths.BorderTop = bMedium;
+                        sEngMaths.BorderBottom = bMedium;
+                        sEngMaths.BorderLeft = bMedium;
+                        sEngMaths.BorderRight = bMedium;
+
+                        XSSFCellStyle sWex = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sWex.SetFillForegroundColor(cWex);
+                        sWex.FillPattern = FillPattern.SolidForeground;
+                        sWex.BorderTop = bMedium;
+                        sWex.BorderBottom = bMedium;
+                        sWex.BorderLeft = bMedium;
+                        sWex.BorderRight = bMedium;
+
+                        XSSFCellStyle sDSS = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sDSS.SetFillForegroundColor(cDSS);
+                        sDSS.FillPattern = FillPattern.SolidForeground;
+                        sDSS.BorderTop = bMedium;
+                        sDSS.BorderBottom = bMedium;
+                        sDSS.BorderLeft = bMedium;
+                        sDSS.BorderRight = bMedium;
+
+                        XSSFCellStyle sTut = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sTut.SetFillForegroundColor(cTut);
+                        sTut.FillPattern = FillPattern.SolidForeground;
+                        sTut.BorderTop = bMedium;
+                        sTut.BorderBottom = bMedium;
+                        sTut.BorderLeft = bMedium;
+                        sTut.BorderRight = bMedium;
+
+                        XSSFCellStyle sOther = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sOther.SetFillForegroundColor(cOther);
+                        sOther.FillPattern = FillPattern.SolidForeground;
+                        sOther.BorderTop = bMedium;
+                        sOther.BorderBottom = bMedium;
+                        sOther.BorderLeft = bMedium;
+                        sOther.BorderRight = bMedium;
+
+                        XSSFCellStyle sTotal = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sTotal.SetFont(fBold);
+                        sTotal.BorderTop = bMedium;
+                        sTotal.BorderBottom = bMedium;
+                        sTotal.BorderLeft = bMedium;
+                        sTotal.BorderRight = bMedium;
+
+                        //Border Only
+                        XSSFCellStyle sBorderLight = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sBorderLight.BorderTop = bLight;
+                        sBorderLight.BorderBottom = bLight;
+                        sBorderLight.BorderLeft = bLight;
+                        sBorderLight.BorderRight = bLight;
+
+                        XSSFCellStyle sBorderMedium = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sBorderMedium.BorderTop = bMedium;
+                        sBorderMedium.BorderBottom = bMedium;
+                        sBorderMedium.BorderLeft = bMedium;
+                        sBorderMedium.BorderRight = bMedium;
+
+                        XSSFCellStyle sEarlySlots = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sEarlySlots.SetFillForegroundColor(cEarlySlots);
+                        sEarlySlots.FillPattern = FillPattern.SolidForeground;
+                        sEarlySlots.BorderTop = bLight;
+                        sEarlySlots.BorderBottom = bLight;
+                        sEarlySlots.BorderLeft = bLight;
+                        sEarlySlots.BorderRight = bLight;
+
+                        XSSFCellStyle sLateSlots = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sLateSlots.SetFillForegroundColor(cLateSlots);
+                        sLateSlots.FillPattern = FillPattern.SolidForeground;
+                        sLateSlots.BorderTop = bLight;
+                        sLateSlots.BorderBottom = bLight;
+                        sLateSlots.BorderLeft = bLight;
+                        sLateSlots.BorderRight = bLight;
+
+                        //Underlined
+                        XSSFCellStyle sUnderlined = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sUnderlined.BorderBottom = bMedium;
+
+                        //Types of courses (date fields
+                        XSSFCellStyle sMainAimDate = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sMainAimDate.SetFillForegroundColor(cMainAim);
+                        sMainAimDate.FillPattern = FillPattern.SolidForeground;
+                        sMainAimDate.BorderTop = bMedium;
+                        sMainAimDate.BorderBottom = bMedium;
+                        sMainAimDate.BorderLeft = bMedium;
+                        sMainAimDate.BorderRight = bMedium;
+                        sMainAimDate.SetFont(fBold);
+                        sMainAimDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
+
+                        XSSFCellStyle sEngMathsDate = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sEngMathsDate.SetFillForegroundColor(cEngMaths);
+                        sEngMathsDate.FillPattern = FillPattern.SolidForeground;
+                        sEngMathsDate.BorderTop = bMedium;
+                        sEngMathsDate.BorderBottom = bMedium;
+                        sEngMathsDate.BorderLeft = bMedium;
+                        sEngMathsDate.BorderRight = bMedium;
+                        sEngMathsDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
+
+                        XSSFCellStyle sWexDate = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sWexDate.SetFillForegroundColor(cWex);
+                        sWexDate.FillPattern = FillPattern.SolidForeground;
+                        sWexDate.BorderTop = bMedium;
+                        sWexDate.BorderBottom = bMedium;
+                        sWexDate.BorderLeft = bMedium;
+                        sWexDate.BorderRight = bMedium;
+                        sWexDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
+
+                        XSSFCellStyle sDSSDate = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sDSSDate.SetFillForegroundColor(cDSS);
+                        sDSSDate.FillPattern = FillPattern.SolidForeground;
+                        sDSSDate.BorderTop = bMedium;
+                        sDSSDate.BorderBottom = bMedium;
+                        sDSSDate.BorderLeft = bMedium;
+                        sDSSDate.BorderRight = bMedium;
+                        sDSSDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
+
+                        XSSFCellStyle sTutDate = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sTutDate.SetFillForegroundColor(cTut);
+                        sTutDate.FillPattern = FillPattern.SolidForeground;
+                        sTutDate.BorderTop = bMedium;
+                        sTutDate.BorderBottom = bMedium;
+                        sTutDate.BorderLeft = bMedium;
+                        sTutDate.BorderRight = bMedium;
+                        sTutDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
+
+                        XSSFCellStyle sOtherDate = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sOtherDate.SetFillForegroundColor(cOther);
+                        sOtherDate.FillPattern = FillPattern.SolidForeground;
+                        sOtherDate.BorderTop = bMedium;
+                        sOtherDate.BorderBottom = bMedium;
+                        sOtherDate.BorderLeft = bMedium;
+                        sOtherDate.BorderRight = bMedium;
+                        sOtherDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
+
+                        //Border Only
+                        XSSFCellStyle sBorderDate = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sBorderDate.BorderTop = bMedium;
+                        sBorderDate.BorderBottom = bMedium;
+                        sBorderDate.BorderLeft = bMedium;
+                        sBorderDate.BorderRight = bMedium;
+                        sBorderDate.SetDataFormat(createHelper.CreateDataFormat().GetFormat("dd/mm/yyyy"));
+
+                        //Create Index Sheet
+                        sheet = workbook.CreateSheet("Index");
+                        row = sheet.CreateRow(0);
+                        row.Height = 1000;
+
+                        //Insert College Logo (to right) - second col/row must be greater otherwise nothing appears
+                        drawing = sheet.CreateDrawingPatriarch();
+                        anchor = createHelper.CreateClientAnchor();
+                        anchor.Col1 = 11;
+                        anchor.Row1 = 0;
+                        anchor.Col2 = 13;
+                        anchor.Row2 = 1;
+                        picture = drawing.CreatePicture(anchor, collegeLogo);
+
+                        cell = row.CreateCell(0);
+
+                        cell.SetCellValue(programme.ProgCode + " - " + programme.ProgTitle);
+                        cell.CellStyle = sHeader;
+
+                        //Merge header row
+                        region = CellRangeAddress.ValueOf("A1:K1");
+                        sheet.AddMergedRegion(region);
+
+                        row = sheet.CreateRow(1);
+
+                        row = sheet.CreateRow(2);
+
+                        cell = row.CreateCell(0, ctString);
+                        cell.SetCellValue("Course Code");
+                        cell.CellStyle = sTableHeader;
+
+                        cell = row.CreateCell(1, ctString);
+                        cell.SetCellValue("Course Title");
+                        cell.CellStyle = sTableHeader;
+
+                        cell = row.CreateCell(2, ctString);
+                        cell.SetCellValue("Qual");
+                        cell.CellStyle = sTableHeader;
+
+                        cell = row.CreateCell(3, ctString);
+                        cell.SetCellValue("Award Body");
+                        cell.CellStyle = sTableHeader;
+
+                        cell = row.CreateCell(4, ctString);
+                        cell.SetCellValue("Hours Per Week");
+                        cell.CellStyle = sTableHeader;
+
+                        cell = row.CreateCell(5, ctString);
+                        cell.SetCellValue("Length in Weeks");
+                        cell.CellStyle = sTableHeader;
+
+                        cell = row.CreateCell(6, ctString);
+                        cell.SetCellValue("Planned Learning Hours 16-18");
+                        cell.CellStyle = sTableHeader;
+
+                        cell = row.CreateCell(7, ctString);
+                        cell.SetCellValue("Planned EEP Hours 16-18");
+                        cell.CellStyle = sTableHeader;
+
+                        cell = row.CreateCell(8, ctString);
+                        cell.SetCellValue("Planned Learning Hours 19+");
+                        cell.CellStyle = sTableHeader;
+
+                        cell = row.CreateCell(9, ctString);
+                        cell.SetCellValue("Planned EEP Hours 19+");
+                        cell.CellStyle = sTableHeader;
+
+                        cell = row.CreateCell(10, ctString);
+                        cell.SetCellValue("Start Date");
+                        cell.CellStyle = sTableHeader;
+
+                        cell = row.CreateCell(11, ctString);
+                        cell.SetCellValue("End Date");
+                        cell.CellStyle = sTableHeader;
+
+                        cell = row.CreateCell(12, ctString);
+                        cell.SetCellValue("Site");
+                        cell.CellStyle = sTableHeader;
+
+                        cell = row.CreateCell(13, ctString);
+                        cell.SetCellValue("Notes");
+                        cell.CellStyle = sTableHeader;
+
+                        //Column widths
+                        sheet.SetColumnWidth(0, 16 * 256);
+                        sheet.SetColumnWidth(1, 40 * 256);
+                        sheet.SetColumnWidth(2, 14 * 256);
+                        sheet.SetColumnWidth(3, 12 * 256);
+                        sheet.SetColumnWidth(4, 8 * 256);
+                        sheet.SetColumnWidth(5, 8 * 256);
+                        sheet.SetColumnWidth(6, 10 * 256);
+                        sheet.SetColumnWidth(7, 10 * 256);
+                        sheet.SetColumnWidth(8, 10 * 256);
+                        sheet.SetColumnWidth(9, 10 * 256);
+                        sheet.SetColumnWidth(10, 12 * 256);
+                        sheet.SetColumnWidth(11, 12 * 256);
+                        sheet.SetColumnWidth(12, 20 * 256);
+                        sheet.SetColumnWidth(13, 20 * 256);
+                        sheet.SetColumnWidth(14, 20 * 256);
+
+                        //The current row in the worksheet
+                        rowNum = 2;
+
+                        //Generate each Excel worksheet
+                        if (programme.Course != null && programme.Course.Count > 0)
                         {
-                            sheet = workbook.CreateSheet(group.ProgCodeWithGroup);
+                            foreach (var crs in programme.Course)
+                            {
+                                rowNum += 1;
+                                row = sheet.CreateRow(rowNum);
+                                XSSFCellStyle cellStyle;
+                                XSSFCellStyle cellStyleDate;
 
-                            //Need narrow columns
-                            sheet.DefaultColumnWidth = 2;
+                                switch (crs.CourseOrder)
+                                {
+                                    case 0:
+                                        cellStyle = sOther;
+                                        cellStyleDate = sOtherDate;
+                                        break;
+                                    case 1:
+                                        cellStyle = sMainAim;
+                                        cellStyleDate = sMainAimDate;
+                                        break;
+                                    case 2:
+                                        cellStyle = sOther;
+                                        cellStyleDate = sOtherDate;
+                                        break;
+                                    case 3:
+                                        cellStyle = sEngMaths;
+                                        cellStyleDate = sEngMathsDate;
+                                        break;
+                                    case 4:
+                                        cellStyle = sEngMaths;
+                                        cellStyleDate = sEngMathsDate;
+                                        break;
+                                    case 5:
+                                        cellStyle = sTut;
+                                        cellStyleDate = sTutDate;
+                                        break;
+                                    case 6:
+                                        cellStyle = sWex;
+                                        cellStyleDate = sWexDate;
+                                        break;
+                                    case 7:
+                                        cellStyle = sDSS;
+                                        cellStyleDate = sDSSDate;
+                                        break;
+                                    case 8:
+                                        cellStyle = sOther;
+                                        cellStyleDate = sOtherDate;
+                                        break;
+                                    default:
+                                        cellStyle = sMainAim;
+                                        cellStyleDate = sMainAimDate;
+                                        break;
+                                }
 
+                                cell = row.CreateCell(0, ctString);
+                                cell.SetCellValue(crs.CourseCode);
+                                cell.CellStyle = cellStyle;
+
+                                cell = row.CreateCell(1, ctString);
+                                cell.SetCellValue(crs.CourseTitle);
+                                cell.CellStyle = cellStyle;
+
+                                cell = row.CreateCell(2, ctString);
+                                cell.SetCellValue(crs.AimCode);
+                                cell.CellStyle = cellStyle;
+
+                                cell = row.CreateCell(3, ctString);
+                                cell.SetCellValue(crs.AwardBody);
+                                cell.CellStyle = cellStyle;
+
+                                cell = row.CreateCell(4, ctNumber);
+                                if (crs.HoursPerWeek >= 0)
+                                {
+                                    cell.SetCellValue((double)crs.HoursPerWeek);
+                                }
+                                cell.CellStyle = cellStyle;
+
+                                cell = row.CreateCell(5, ctNumber);
+                                if (crs.Weeks >= 0)
+                                {
+                                    cell.SetCellValue((double)crs.Weeks);
+                                }
+                                cell.CellStyle = cellStyle;
+
+                                cell = row.CreateCell(6, ctNumber);
+                                if (crs.PLH1618 >= 0)
+                                {
+                                    cell.SetCellValue((double)crs.PLH1618);
+                                }
+                                cell.CellStyle = cellStyle;
+
+                                cell = row.CreateCell(7, ctNumber);
+                                if (crs.EEP1618 >= 0)
+                                {
+                                    cell.SetCellValue((double)crs.EEP1618);
+                                }
+                                cell.CellStyle = cellStyle;
+
+                                cell = row.CreateCell(8, ctNumber);
+                                if (crs.PLH19 >= 0)
+                                {
+                                    cell.SetCellValue((double)crs.PLH19);
+                                }
+                                cell.CellStyle = cellStyle;
+
+                                cell = row.CreateCell(9, ctNumber);
+                                if (crs.EEP19 >= 0)
+                                {
+                                    cell.SetCellValue((double)crs.EEP19);
+                                }
+                                cell.CellStyle = cellStyle;
+
+                                cell = row.CreateCell(10, ctNumber);
+                                cell.CellStyle = cellStyleDate;
+                                cell.SetCellValue((DateTime)crs.StartDate);
+
+                                cell = row.CreateCell(11, ctNumber);
+                                cell.CellStyle = cellStyleDate;
+                                cell.SetCellValue((DateTime)crs.EndDate);
+
+                                cell = row.CreateCell(12, ctString);
+                                cell.SetCellValue(crs.SiteName);
+                                cell.CellStyle = cellStyle;
+
+                                cell = row.CreateCell(13, ctString);
+                                cell.SetCellValue(crs.Notes);
+                                cell.CellStyle = cellStyle;
+                            }
+
+                            ////Set widths(does not seem to work very well)
+                            //int numberOfColumns = indexSheet.GetRow(4).PhysicalNumberOfCells;
+                            //for (int i = 1; i <= numberOfColumns; i++)
+                            //{
+                            //    indexSheet.AutoSizeColumn(i);
+                            //    GC.Collect(); // Add this line
+                            //}
+                        }
+                        else
+                        {
+                            rowNum += 1;
+                            row = sheet.CreateRow(rowNum);
+
+                            cell = row.CreateCell(0, ctString);
+                            cell.CellStyle = sHeader;
+                            cell.SetCellValue("Error - No courses could be loaded. Please check CourseData Stored Procedure");
+                        }
+
+
+
+                        if (programme.Group != null && programme.Group.Count > 0)
+                        {
+                            foreach (var group in programme.Group)
+                            {
+                                sheet = workbook.CreateSheet(group.ProgCodeWithGroup);
+
+                                //Need narrow columns
+                                sheet.DefaultColumnWidth = 2;
+
+                                row = sheet.CreateRow(0);
+                                row.Height = 1000;
+
+                                //Insert College Logo (to right) - second col/row must be greater otherwise nothing appears
+                                drawing = sheet.CreateDrawingPatriarch();
+                                anchor = createHelper.CreateClientAnchor();
+                                anchor.Col1 = 48;
+                                anchor.Row1 = 0;
+                                anchor.Col2 = 53;
+                                anchor.Row2 = 1;
+                                picture = drawing.CreatePicture(anchor, collegeLogo);
+
+                                cell = row.CreateCell(0);
+
+                                cell.SetCellValue("Group " + group.GroupCode + " for " + programme.ProgCode + " - " + programme.ProgTitle);
+                                cell.CellStyle = sHeader;
+
+                                row = sheet.CreateRow(1);
+                                row = sheet.CreateRow(2);
+                                row = sheet.CreateRow(3);
+
+                                cell = row.CreateCell(0, ctBlank);
+
+                                cell = row.CreateCell(1, ctString);
+                                cell.SetCellValue("Programme Details");
+                                cell.CellStyle = sSubHeader;
+
+                                //Merge Cells for Title
+                                region = CellRangeAddress.ValueOf("A1:AJ1");
+                                sheet.AddMergedRegion(region);
+
+                                row = sheet.CreateRow(4);
+
+                                cell = row.CreateCell(0, ctBlank);
+
+                                cell = row.CreateCell(1, ctString);
+                                cell.SetCellValue("Faculty:");
+
+                                cell = row.CreateCell(2, ctString);
+                                cell.SetCellValue(programme.FacName);
+                                cell.CellStyle = sUnderlined;
+
+                                cell = row.CreateCell(3, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(4, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(5, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(6, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(7, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(8, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(9, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(10, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(11, ctString);
+                                cell.CellStyle = sUnderlined;
+
+                                cell = row.CreateCell(12, ctString);
+
+                                cell = row.CreateCell(13, ctString);
+                                cell.SetCellValue("Mode:");
+
+                                cell = row.CreateCell(20, ctString);
+                                cell.SetCellValue(programme.ModeOfAttendanceName);
+                                cell.CellStyle = sUnderlined;
+
+                                cell = row.CreateCell(21, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(22, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(23, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(24, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(25, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(26, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(27, ctString);
+                                cell.CellStyle = sUnderlined;
+
+                                row = sheet.CreateRow(5);
+
+                                cell = row.CreateCell(0, ctBlank);
+
+                                cell = row.CreateCell(1, ctString);
+                                cell.SetCellValue("Team:");
+
+                                cell = row.CreateCell(2, ctString);
+                                cell.SetCellValue(programme.TeamName);
+                                cell.CellStyle = sUnderlined;
+
+                                cell = row.CreateCell(3, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(4, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(5, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(6, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(7, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(8, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(9, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(10, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(11, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(12, ctString);
+
+                                cell = row.CreateCell(13, ctString);
+                                cell.SetCellValue("Site:");
+
+                                cell = row.CreateCell(20, ctString);
+                                cell.SetCellValue(programme.SiteName);
+                                cell.CellStyle = sUnderlined;
+
+                                cell = row.CreateCell(21, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(22, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(23, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(24, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(25, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(26, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(27, ctString);
+                                cell.CellStyle = sUnderlined;
+
+                                row = sheet.CreateRow(6);
+
+                                cell = row.CreateCell(0, ctBlank);
+
+                                cell = row.CreateCell(1, ctString);
+                                cell.SetCellValue("Parent Code:");
+
+                                cell = row.CreateCell(2, ctString);
+                                cell.SetCellValue(programme.ProgCode);
+                                cell.CellStyle = sUnderlined;
+
+                                cell = row.CreateCell(3, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(4, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(5, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(6, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(7, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(8, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(9, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(10, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(11, ctString);
+                                cell.CellStyle = sUnderlined;
+
+                                cell = row.CreateCell(12, ctString);
+
+                                cell = row.CreateCell(13, ctString);
+                                cell.SetCellValue("Prog Planned Hours:");
+
+                                cell = row.CreateCell(20, ctNumber);
+                                cell.SetCellValue((double)(programme.PLHMax + programme.EEPMax));
+                                cell.CellStyle = sUnderlined;
+
+                                cell = row.CreateCell(21, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(22, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(23, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(24, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(25, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(26, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(27, ctString);
+                                cell.CellStyle = sUnderlined;
+
+                                row = sheet.CreateRow(7);
+
+                                cell = row.CreateCell(0, ctBlank);
+
+                                cell = row.CreateCell(1, ctString);
+                                cell.SetCellValue("Title:");
+
+                                cell = row.CreateCell(2, ctString);
+                                cell.SetCellValue(programme.ProgTitle);
+                                cell.CellStyle = sUnderlined;
+
+                                cell = row.CreateCell(3, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(4, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(5, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(6, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(7, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(8, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(9, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(10, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(11, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(12, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(13, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(14, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(15, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(16, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(17, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(18, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(19, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(20, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(21, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(22, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(23, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(24, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(25, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(26, ctString);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(27, ctString);
+                                cell.CellStyle = sUnderlined;
+
+                                //Merge Cells
+                                region = CellRangeAddress.ValueOf("A3:AC3");
+                                sheet.AddMergedRegion(region);
+
+                                region = CellRangeAddress.ValueOf("A4:A8");
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("AC4:AC8");
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("M5:M7");
+                                sheet.AddMergedRegion(region);
+
+                                region = CellRangeAddress.ValueOf("B4:AB4");
+                                sheet.AddMergedRegion(region);
+
+                                region = CellRangeAddress.ValueOf("C5:L5");
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("N5:T5");
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("U5:AB5");
+                                sheet.AddMergedRegion(region);
+
+                                region = CellRangeAddress.ValueOf("C6:L6");
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("N6:T6");
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("U6:AB6");
+                                sheet.AddMergedRegion(region);
+
+                                region = CellRangeAddress.ValueOf("C7:L7");
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("N7:T7");
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("U7:AB7");
+                                sheet.AddMergedRegion(region);
+
+                                region = CellRangeAddress.ValueOf("C8:AB8");
+                                sheet.AddMergedRegion(region);
+
+                                region = CellRangeAddress.ValueOf("A9:AC9");
+                                sheet.AddMergedRegion(region);
+
+                                row = sheet.CreateRow(8);
+                                cell = row.CreateCell(0, ctBlank);
+
+                                row = sheet.CreateRow(9);
+
+                                //Put a border around top section
+                                region = CellRangeAddress.ValueOf("A3:AC9");
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                row = sheet.CreateRow(10);
+
+                                if (TimetableSection != null && TimetableSection.Count > 0)
+                                {
+                                    foreach (var section in TimetableSection)
+                                    {
+                                        cell = row.CreateCell(0, ctBlank);
+                                        cell.CellStyle = sTableHeader;
+
+                                        cell = row.CreateCell(1, ctBlank);
+                                        cell.CellStyle = sTableHeader;
+
+                                        colNum = 1;
+
+                                        if (Time != null && Time.Count > 0)
+                                        {
+                                            foreach (var time in Time)
+                                            {
+                                                colNum += 1;
+
+                                                cell = row.CreateCell(colNum, ctString);
+                                                cell.SetCellValue(time.TimeName.ToString());
+                                                cell.CellStyle = sTableHeaderLightRotated;
+                                            }
+                                        }
+
+                                        colNum += 1;
+                                        cell = row.CreateCell(colNum, ctString);
+                                        cell.SetCellValue("Weekly Hrs");
+                                        cell.CellStyle = sTableHeader;
+
+                                        colNum += 1;
+                                        cell = row.CreateCell(colNum, ctString);
+                                        cell.SetCellValue("Number of slots available in the FE academic year");
+                                        cell.CellStyle = sTableHeader;
+                                    }
+                                }
+                                //Draw timetable grid
+                                //The current row in the worksheet
+                                rowNum = 10;
+                                if (Day != null && Day.Count > 0)
+                                {
+                                    foreach (var day in Day)
+                                    {
+                                        startAtRowNum = rowNum + 1;
+
+                                        if (TimetableSection != null && TimetableSection.Count > 0)
+                                        {
+                                            foreach (var section in TimetableSection)
+                                            {
+                                                rowNum += 1;
+
+                                                row = sheet.CreateRow(rowNum);
+
+                                                cell = row.CreateCell(0, ctString);
+                                                cell.SetCellValue(day.DayName);
+                                                cell.CellStyle = sTableHeaderCenterRotated;
+
+                                                cell = row.CreateCell(1, ctString);
+                                                cell.SetCellValue(section.SectionName);
+
+                                                colNum = 1;
+
+                                                XSSFCellStyle cellStyle;
+
+                                                if (Time != null && Time.Count > 0)
+                                                {
+                                                    foreach (var time in Time)
+                                                    {
+                                                        colNum += 1;
+
+                                                        if (time.Hours < 9)
+                                                        {
+                                                            cellStyle = sEarlySlots;
+                                                        }
+                                                        else if (time.Hours >= 17)
+                                                        {
+                                                            cellStyle = sLateSlots;
+                                                        }
+                                                        else
+                                                        {
+                                                            cellStyle = sBorderLight;
+                                                        }
+
+                                                        cell = row.CreateCell(colNum, ctBlank);
+                                                        cell.CellStyle = cellStyle;
+                                                    }
+                                                }
+
+                                                //Add additional rows
+                                                colNum += 1;
+                                                cell = row.CreateCell(colNum, ctNumber);
+                                                cell.CellStyle = sWeeklyHours;
+
+                                                colNum += 1;
+                                                cell = row.CreateCell(colNum, ctNumber);
+                                                cell.SetCellValue(day.Slots);
+                                                cell.CellStyle = sMergedCentredTotal;
+                                            }
+                                        }
+
+                                        //Merge Day rows and end rows
+                                        region = CellRangeAddress.ValueOf("A" + (startAtRowNum + 1) + ":A" + (rowNum + 1));
+                                        sheet.AddMergedRegion(region);
+
+                                        region = CellRangeAddress.ValueOf("BA" + (startAtRowNum + 1) + ":BA" + (rowNum + 1));
+                                        sheet.AddMergedRegion(region);
+                                        region = CellRangeAddress.ValueOf("BB" + (startAtRowNum + 1) + ":BB" + (rowNum + 1));
+                                        sheet.AddMergedRegion(region);
+                                    }
+                                }
+
+                                //Total row
+                                rowNum += 1;
+                                row = sheet.CreateRow(rowNum);
+                                cell = row.CreateCell(0, ctString);
+                                cell.SetCellValue("Total Weekly Hours");
+                                cell.CellStyle = sMergedRightTotal;
+                                cell = row.CreateCell(52, ctFormula);
+                                cell.CellStyle = sTotal;
+                                cell.CellFormula = "BA12+BA17+BA22+BA27+BA32";
+
+                                region = CellRangeAddress.ValueOf("A37:AZ37");
+                                sheet.AddMergedRegion(region);
+
+                                sheet.SetColumnWidth(0, 4 * 256);
+                                sheet.SetColumnWidth(1, 30 * 256);
+
+                                sheet.SetColumnWidth(52, 8 * 256);
+                                sheet.SetColumnWidth(53, 16 * 256);
+
+                                //Signature rows at bottom
+                                rowNum += 1;
+                                row = sheet.CreateRow(rowNum);
+                                cell = row.CreateCell(0, ctBlank);
+
+                                rowNum += 1;
+                                row = sheet.CreateRow(rowNum);
+
+                                cell = row.CreateCell(0, ctString);
+                                cell.SetCellValue("Position:");
+
+                                cell = row.CreateCell(1, ctBlank);
+
+                                cell = row.CreateCell(2, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(3, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(4, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(5, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(6, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(7, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(8, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(9, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(10, ctBlank);
+                                cell.CellStyle = sUnderlined;
+
+                                cell = row.CreateCell(11, ctBlank);
+
+                                cell = row.CreateCell(12, ctString);
+                                cell.SetCellValue("Print Name:");
+
+                                cell = row.CreateCell(16, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(17, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(18, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(19, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(20, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(21, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(22, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(23, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(24, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(25, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(26, ctBlank);
+                                cell.CellStyle = sUnderlined;
+
+                                cell = row.CreateCell(27, ctBlank);
+
+                                cell = row.CreateCell(28, ctString);
+                                cell.SetCellValue("Signed:");
+
+                                cell = row.CreateCell(32, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(33, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(34, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(35, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(36, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(37, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(38, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(39, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(40, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(41, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(42, ctBlank);
+                                cell.CellStyle = sUnderlined;
+
+                                //Merge Cells
+                                region = CellRangeAddress.ValueOf("A" + (rowNum + 1) + ":B" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("C" + (rowNum + 1) + ":K" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("M" + (rowNum + 1) + ":P" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("Q" + (rowNum + 1) + ":AA" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("AC" + (rowNum + 1) + ":AF" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("AG" + (rowNum + 1) + ":AQ" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+
+                                rowNum += 1;
+                                row = sheet.CreateRow(rowNum);
+                                cell = row.CreateCell(0, ctBlank);
+
+                                rowNum += 1;
+                                row = sheet.CreateRow(rowNum);
+
+                                cell = row.CreateCell(0, ctString);
+                                cell.SetCellValue("Actioned By:");
+
+                                cell = row.CreateCell(1, ctBlank);
+
+                                cell = row.CreateCell(2, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(3, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(4, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(5, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(6, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(7, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(8, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(9, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(10, ctBlank);
+                                cell.CellStyle = sUnderlined;
+
+                                cell = row.CreateCell(11, ctBlank);
+
+                                cell = row.CreateCell(12, ctString);
+                                cell.SetCellValue("Date:");
+
+                                cell = row.CreateCell(16, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(17, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(18, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(19, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(20, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(21, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(22, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(23, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(24, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(25, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(26, ctBlank);
+                                cell.CellStyle = sUnderlined;
+
+                                cell = row.CreateCell(27, ctBlank);
+
+                                cell = row.CreateCell(28, ctString);
+                                cell.SetCellValue("Checked:");
+
+                                cell = row.CreateCell(32, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(33, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(34, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(35, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(36, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(37, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(38, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(39, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(40, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(41, ctBlank);
+                                cell.CellStyle = sUnderlined;
+                                cell = row.CreateCell(42, ctBlank);
+                                cell.CellStyle = sUnderlined;
+
+                                //Merge Cells
+                                region = CellRangeAddress.ValueOf("A" + (rowNum + 1) + ":B" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("C" + (rowNum + 1) + ":K" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("M" + (rowNum + 1) + ":P" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("Q" + (rowNum + 1) + ":AA" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("AC" + (rowNum + 1) + ":AF" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("AG" + (rowNum + 1) + ":AQ" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+
+                                rowNum += 1;
+                                row = sheet.CreateRow(rowNum);
+                                cell = row.CreateCell(0, ctBlank);
+
+                                rowNum += 1;
+                                row = sheet.CreateRow(rowNum);
+
+                                cell = row.CreateCell(0, ctString);
+                                cell.SetCellValue("Comments/ Specialist Room Request:");
+
+                                for (int i = 2; i <= 42; i++)
+                                {
+                                    cell = row.CreateCell(i, ctBlank);
+                                    cell.CellStyle = sUnderlined;
+                                }
+
+                                region = CellRangeAddress.ValueOf("A" + (rowNum + 1) + ":B" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+                                region = CellRangeAddress.ValueOf("C" + (rowNum + 1) + ":AQ" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+
+                                //This should be coded into loop to ensure it is applied to correct ranges
+                                int startRow;
+                                int endRow;
+
+                                //Header - does not work when cells have backgrounds
+                                //startRow = 11;
+                                //endRow = 11;
+
+                                //region = CellRangeAddress.ValueOf("C" + startRow + ":D" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("E" + startRow + ":H" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("I" + startRow + ":L" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("M" + startRow + ":P" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("Q" + startRow + ":T" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("U" + startRow + ":X" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("Y" + startRow + ":AB" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AC" + startRow + ":AF" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AG" + startRow + ":AJ" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AK" + startRow + ":AN" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AO" + startRow + ":AR" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AS" + startRow + ":AV" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AW" + startRow + ":AZ" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //Monday
+                                startRow = 12;
+                                endRow = 16;
+
+                                //region = CellRangeAddress.ValueOf("C" + startRow + ":D" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("E" + startRow + ":H" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("I" + startRow + ":L" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("M" + startRow + ":P" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("Q" + startRow + ":T" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("U" + startRow + ":X" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("Y" + startRow + ":AB" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("AC" + startRow + ":AF" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("AG" + startRow + ":AJ" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AK" + startRow + ":AN" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AO" + startRow + ":AR" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AS" + startRow + ":AV" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AW" + startRow + ":AZ" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //Tuesday
+                                startRow = 17;
+                                endRow = 21;
+
+                                //region = CellRangeAddress.ValueOf("C" + startRow + ":D" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("E" + startRow + ":H" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("I" + startRow + ":L" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("M" + startRow + ":P" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("Q" + startRow + ":T" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("U" + startRow + ":X" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("Y" + startRow + ":AB" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("AC" + startRow + ":AF" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("AG" + startRow + ":AJ" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AK" + startRow + ":AN" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AO" + startRow + ":AR" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AS" + startRow + ":AV" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AW" + startRow + ":AZ" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //Wednesday
+                                startRow = 22;
+                                endRow = 26;
+
+                                //region = CellRangeAddress.ValueOf("C" + startRow + ":D" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("E" + startRow + ":H" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("I" + startRow + ":L" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("M" + startRow + ":P" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("Q" + startRow + ":T" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("U" + startRow + ":X" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("Y" + startRow + ":AB" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("AC" + startRow + ":AF" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("AG" + startRow + ":AJ" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AK" + startRow + ":AN" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AO" + startRow + ":AR" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AS" + startRow + ":AV" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AW" + startRow + ":AZ" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //Thursday
+                                startRow = 27;
+                                endRow = 31;
+
+                                //region = CellRangeAddress.ValueOf("C" + startRow + ":D" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("E" + startRow + ":H" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("I" + startRow + ":L" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("M" + startRow + ":P" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("Q" + startRow + ":T" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("U" + startRow + ":X" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("Y" + startRow + ":AB" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("AC" + startRow + ":AF" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("AG" + startRow + ":AJ" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AK" + startRow + ":AN" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AO" + startRow + ":AR" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AS" + startRow + ":AV" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AW" + startRow + ":AZ" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //Friday
+                                startRow = 32;
+                                endRow = 36;
+
+                                //region = CellRangeAddress.ValueOf("C" + startRow + ":D" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("E" + startRow + ":H" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("I" + startRow + ":L" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("M" + startRow + ":P" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("Q" + startRow + ":T" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("U" + startRow + ":X" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("Y" + startRow + ":AB" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("AC" + startRow + ":AF" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                region = CellRangeAddress.ValueOf("AG" + startRow + ":AJ" + endRow);
+                                RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AK" + startRow + ":AN" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AO" + startRow + ":AR" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AS" + startRow + ":AV" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+
+                                //region = CellRangeAddress.ValueOf("AW" + startRow + ":AZ" + endRow);
+                                //RegionUtil.SetBorderTop(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderBottom(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderLeft(2, region, sheet, workbook);
+                                //RegionUtil.SetBorderRight(2, region, sheet, workbook);
+                            }
+                        }
+                        else
+                        {
+                            sheet = workbook.CreateSheet("ERROR No Groups");
                             row = sheet.CreateRow(0);
-                            row.Height = 1000;
+                            cell = row.CreateCell(0, ctString);
+                            cell.CellStyle = sHeader;
+                            cell.SetCellValue("Error - No groups could be loaded. Please check GroupData Stored Procedure");
+                        }
 
-                            //Insert College Logo (to right) - second col/row must be greater otherwise nothing appears
-                            drawing = sheet.CreateDrawingPatriarch();
-                            anchor = createHelper.CreateClientAnchor();
-                            anchor.Col1 = 11;
-                            anchor.Row1 = 0;
-                            anchor.Col2 = 13;
-                            anchor.Row2 = 1;
-                            picture = drawing.CreatePicture(anchor, collegeLogo);
-
+                        if (Week != null && Week.Count > 0)
+                        {
+                            //Create Weeks Sheet
+                            sheet = workbook.CreateSheet("Weeks");
+                            row = sheet.CreateRow(0);
                             cell = row.CreateCell(0);
 
-                            cell.SetCellValue("Group " + group.GroupCode + " for " + programme.ProgCode + " - " + programme.ProgTitle);
+                            cell.SetCellValue("Weeks");
                             cell.CellStyle = sHeader;
 
                             row = sheet.CreateRow(1);
                             row = sheet.CreateRow(2);
 
                             cell = row.CreateCell(0, ctString);
-                            cell.SetCellValue("Programme Details");
-                            cell.CellStyle = sSubHeader;
+                            cell.SetCellValue("Week Num");
+                            cell.CellStyle = sTableHeader;
+
+                            cell = row.CreateCell(1, ctString);
+                            cell.SetCellValue("Week Desc");
+                            cell.CellStyle = sTableHeader;
+
+                            cell = row.CreateCell(2, ctString);
+                            cell.SetCellValue("Notes");
+                            cell.CellStyle = sTableHeader;
+
+                            rowNum = 2;
+
+                            foreach (var week in Week)
+                            {
+                                rowNum += 1;
+                                row = sheet.CreateRow(rowNum);
+
+                                cell = row.CreateCell(0, ctNumber);
+                                if (week.WeekNum >= 0)
+                                {
+                                    cell.SetCellValue((double)week.WeekNum);
+                                }
+                                cell.CellStyle = sBorderMedium;
+
+                                cell = row.CreateCell(1, ctString);
+                                cell.SetCellValue(week.WeekDesc);
+                                cell.CellStyle = sBorderMedium;
+
+                                cell = row.CreateCell(2, ctString);
+                                cell.SetCellValue(week.Notes);
+                                cell.CellStyle = sBorderMedium;
+                            }
+
+                            //Column widths
+                            sheet.SetColumnWidth(0, 8 * 256);
+                            sheet.SetColumnWidth(1, 20 * 256);
+                            sheet.SetColumnWidth(2, 20 * 256);
+                        }
+
+                        if (TermDate != null && TermDate.Count > 0)
+                        {
+                            //Create TermDates Sheet
+                            sheet = workbook.CreateSheet("Term Dates");
+                            row = sheet.CreateRow(0);
+                            cell = row.CreateCell(0);
+
+                            cell.SetCellValue("Term Dates");
+                            cell.CellStyle = sHeader;
+
+                            row = sheet.CreateRow(1);
+
+                            row = sheet.CreateRow(2);
+                            cell = row.CreateCell(0, ctString);
+                            cell.SetCellValue("Academic Year " + CurrentAcademicYear);
+                            cell.CellStyle = sTableHeader;
+
+                            cell = row.CreateCell(1, ctBlank);
+                            cell.CellStyle = sTableHeader;
+
+                            //Merge top table header row
+                            region = CellRangeAddress.ValueOf("A3:B3");
+                            sheet.AddMergedRegion(region);
 
                             row = sheet.CreateRow(3);
 
                             cell = row.CreateCell(0, ctString);
-                            cell.SetCellValue("Faculty:");
+                            cell.SetCellValue("Term Date");
+                            cell.CellStyle = sTableHeader;
 
                             cell = row.CreateCell(1, ctString);
-                            cell.SetCellValue(programme.FacName);
-                            cell.CellStyle = sBorder;
+                            cell.SetCellValue("Dates");
+                            cell.CellStyle = sTableHeader;
 
-                            cell = row.CreateCell(2, ctString);
+                            rowNum = 3;
 
-                            cell = row.CreateCell(3, ctString);
-                            cell.SetCellValue("Mode:");
-
-                            cell = row.CreateCell(4, ctString);
-                            cell.SetCellValue(programme.ModeOfAttendanceName);
-                            cell.CellStyle = sBorder;
-
-                            row = sheet.CreateRow(4);
-
-                            cell = row.CreateCell(0, ctString);
-                            cell.SetCellValue("Team:");
-
-                            cell = row.CreateCell(1, ctString);
-                            cell.SetCellValue(programme.TeamName);
-                            cell.CellStyle = sBorder;
-
-                            cell = row.CreateCell(2, ctString);
-
-                            cell = row.CreateCell(3, ctString);
-                            cell.SetCellValue("Site:");
-
-                            cell = row.CreateCell(4, ctString);
-                            cell.SetCellValue(programme.SiteName);
-                            cell.CellStyle = sBorder;
-
-                            row = sheet.CreateRow(5);
-
-                            cell = row.CreateCell(0, ctString);
-                            cell.SetCellValue("Parent Code:");
-
-                            cell = row.CreateCell(1, ctString);
-                            cell.SetCellValue(programme.ProgCode);
-                            cell.CellStyle = sBorder;
-
-                            cell = row.CreateCell(2, ctString);
-
-                            cell = row.CreateCell(3, ctString);
-                            cell.SetCellValue("Prog Planned Hours:");
-
-                            cell = row.CreateCell(4, ctNumber);
-                            cell.SetCellValue((double)(programme.PLHMax + programme.EEPMax));
-                            cell.CellStyle = sBorder;
-
-                            row = sheet.CreateRow(6);
-
-                            cell = row.CreateCell(0, ctString);
-                            cell.SetCellValue("Title:");
-
-                            cell = row.CreateCell(1, ctString);
-                            cell.SetCellValue(programme.ProgTitle);
-                            cell.CellStyle = sBorder;
-
-                            row = sheet.CreateRow(7);
-                            row = sheet.CreateRow(8);
-
-                            if (TimetableSection != null && TimetableSection.Count > 0)
+                            foreach (var termDate in TermDate)
                             {
-                                foreach (var section in TimetableSection)
+                                rowNum += 1;
+                                row = sheet.CreateRow(rowNum);
+
+                                XSSFCellStyle cellStyle;
+
+                                if (termDate.IsTerm == true)
                                 {
-                                    cell = row.CreateCell(0, ctBlank);
-                                    cell.CellStyle = sTableHeader;
+                                    cellStyle = sTotal;
+                                }
+                                else
+                                {
+                                    cellStyle = sBorderMedium;
+                                }
+
+                                cell = row.CreateCell(0, ctNumber);
+                                cell.SetCellValue(termDate.TermDateName);
+                                cell.CellStyle = cellStyle;
+
+                                cell = row.CreateCell(1, ctString);
+                                cell.SetCellValue(termDate.Dates);
+                                cell.CellStyle = sBorderMedium;
+                            }
+
+                            //Add extra rows
+                            rowNum += 1;
+                            row = sheet.CreateRow(rowNum);
+
+                            //Merge bottom row
+                            region = CellRangeAddress.ValueOf("A" + (rowNum + 1) + ":B" + (rowNum + 1));
+                            sheet.AddMergedRegion(region);
+
+                            cell = row.CreateCell(0, ctString);
+                            cell.SetCellValue("*End of year dates will vary by course; some students may finish earlier or later");
+                            cell.CellStyle = sTotalRight;
+
+
+
+                            //Column widths
+                            sheet.SetColumnWidth(0, 20 * 256);
+                            sheet.SetColumnWidth(1, 50 * 256);
+
+                            if (BankHoliday != null && BankHoliday.Count > 0)
+                            {
+                                rowNum += 1;
+                                row = sheet.CreateRow(rowNum);
+                                rowNum += 1;
+                                row = sheet.CreateRow(rowNum);
+
+                                cell = row.CreateCell(0);
+                                cell.SetCellValue("Bank Holidays");
+                                cell.CellStyle = sTableHeader;
+
+                                cell = row.CreateCell(1);
+                                cell.CellStyle = sTableHeader;
+
+                                region = CellRangeAddress.ValueOf("A" + (rowNum + 1) + ":B" + (rowNum + 1));
+                                sheet.AddMergedRegion(region);
+
+                                foreach (var bankHoliday in BankHoliday)
+                                {
+                                    rowNum += 1;
+                                    row = sheet.CreateRow(rowNum);
+
+                                    cell = row.CreateCell(0, ctString);
+                                    cell.SetCellValue(bankHoliday.BankHolidayDesc);
+                                    cell.CellStyle = sBorderMedium;
 
                                     cell = row.CreateCell(1, ctBlank);
-                                    cell.CellStyle = sTableHeader;
+                                    cell.CellStyle = sBorderMedium;
 
-                                    colNum = 1;
-
-                                    if (Time != null && Time.Count > 0)
-                                    {
-                                        foreach (var time in Time)
-                                        {
-                                            colNum += 1;
-
-                                            cell = row.CreateCell(colNum, ctString);
-                                            cell.SetCellValue(time.TimeName.ToString());
-                                            cell.CellStyle = sTableHeader;
-                                        }
-                                    }
+                                    region = CellRangeAddress.ValueOf("A" + (rowNum + 1) + ":B" + (rowNum + 1));
+                                    sheet.AddMergedRegion(region);
                                 }
                             }
-                            //Draw timetable grid
-                            //The current row in the worksheet
-                            rowNum = 8;
-                            if (Day != null && Day.Count > 0)
-                            {
-                                foreach (var day in Day)
-                                {
-                                    if (TimetableSection != null && TimetableSection.Count > 0)
-                                    {
-                                        foreach (var section in TimetableSection)
-                                        {
-                                            rowNum += 1;
-
-                                            row = sheet.CreateRow(rowNum);
-
-                                            cell = row.CreateCell(0, ctString);
-                                            cell.SetCellValue(day.DayName);
-
-                                            cell = row.CreateCell(1, ctString);
-                                            cell.SetCellValue(section.SectionName);
-
-                                            colNum = 1;
-
-                                            if (Time != null && Time.Count > 0)
-                                            {
-                                                foreach (var time in Time)
-                                                {
-                                                    colNum += 1;
-
-                                                    cell = row.CreateCell(colNum, ctBlank);
-                                                    cell.CellStyle = sBorder;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            sheet.SetColumnWidth(0, 16 * 256);
-                            sheet.SetColumnWidth(1, 40 * 256);
                         }
-                    }
-                    else
-                    {
-                        sheet = workbook.CreateSheet("ERROR No Groups");
-                        row = sheet.CreateRow(0);
-                        cell = row.CreateCell(0, ctString);
-                        cell.CellStyle = sHeader;
-                        cell.SetCellValue("Error - No groups could be loaded. Please check GroupData Stored Procedure");
-                    }
 
-                    workbook.Write(fs);
+                        workbook.Write(fs);
+                    }
+                    using (var stream = new FileStream(Path.Combine(filePath, fileName), FileMode.Open))
+                    {
+                        await stream.CopyToAsync(memory);
+                    }
+                    memory.Position = 0;
                 }
-                using (var stream = new FileStream(Path.Combine(filePath, fileName), FileMode.Open))
-                {
-                    await stream.CopyToAsync(memory);
-                }
-                memory.Position = 0;
             }
 
-            return Page();
+            //Now create a compressed zip file with all timetables in deleting any previous zips
+            if(Directory.Exists(ZipPath))
+            {
+                Directory.Delete(ZipPath, true);
+            }
+            
+            Directory.CreateDirectory(ZipPath);
+            ZipFile.CreateFromDirectory(SavePath, ZipPath + @"\Timetables.zip");
+
+            //Now delete the folder where the timetables were generated
+            if (Directory.Exists(SavePath))
+            {
+                Directory.Delete(SavePath, true);
+            }
+
+            string result = "{\"timetables\":{\"savePath\":\"" + SavePath.Replace("\\", "\\\\") + "\",\"numFilesExported\":" + NumFilesExported + "}}";
+
+            //return Page();
+            return Content(result);
         }
     }
 }

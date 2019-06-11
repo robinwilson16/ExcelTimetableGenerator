@@ -1,0 +1,5 @@
+CREATE TABLE ETG_BankHoliday (
+	BankHolidayID INT IDENTITY(1,1),
+	BankHolidayDesc NVARCHAR(255),
+	CONSTRAINT ETG_BankHoliday_PK PRIMARY KEY ( BankHolidayID )
+)

@@ -1,6 +1,7 @@
 CREATE PROCEDURE [dbo].[SPR_ETG_ProgrammeData]
 	@AcademicYear NVARCHAR(5),
-	@PlanRevisionID INT
+	@PlanRevisionID INT,
+	@Course NVARCHAR(50)
 AS
 BEGIN
 	SET NOCOUNT ON;
@@ -65,6 +66,7 @@ BEGIN
 		ON PGS.PlanEntityID = PS.PlanEntityID
 	WHERE
 		PRG.AcademicYear = @AcademicYear
+		AND PRG.Code = COALESCE ( @Course, PRG.Code )
 		AND PAR.OfferingID IS NULL --Parent doesn't have a parent
 		AND STA.StatusCode = 8 --Running (Approved)
 	ORDER BY

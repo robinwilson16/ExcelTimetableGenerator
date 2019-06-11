@@ -1,0 +1,26 @@
+CREATE PROCEDURE [dbo].[SPR_ETG_Time]
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+	SELECT
+		TimeID = CAST ( CNT.RowNum AS INT ),
+		TimeName = FORMAT ( ( ( ( CNT.RowNum * 60 ) / 4 ) + ( 8 * 60 ) ) / 60, '#00' ) + ':' + FORMAT ( ( ( ( CNT.RowNum * 60 ) / 4 ) + ( 8 * 60 ) ) % 60, '#00' ),
+		Hours = CAST ( ( ( ( CNT.RowNum * 60 ) / 4 ) + ( 8 * 60 ) ) / 60 AS INT ),
+		Mins = CAST ( ( ( ( CNT.RowNum * 60 ) / 4 ) + ( 8 * 60 ) ) % 60 AS INT )
+	FROM (
+		SELECT
+			RowNum = 
+				ROW_NUMBER () OVER ( 
+					ORDER BY
+						OBJ.object_id
+				)
+		FROM sys.all_objects OBJ
+	) CNT
+	WHERE
+		CNT.RowNum < 53
+		AND FORMAT ( ( ( ( CNT.RowNum * 60 ) / 4 ) + ( 8 * 60 ) ) / 60, '#00' ) + ':' + FORMAT ( ( ( ( CNT.RowNum * 60 ) / 4 ) + ( 8 * 60 ) ) % 60, '#00' ) >= '08:30'
+		AND FORMAT ( ( ( ( CNT.RowNum * 60 ) / 4 ) + ( 8 * 60 ) ) / 60, '#00' ) + ':' + FORMAT ( ( ( ( CNT.RowNum * 60 ) / 4 ) + ( 8 * 60 ) ) % 60, '#00' ) < '21:00'
+	ORDER BY
+		CNT.RowNum
+END

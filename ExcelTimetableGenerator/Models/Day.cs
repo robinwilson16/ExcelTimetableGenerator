@@ -13,5 +13,6 @@ namespace ExcelTimetableGenerator.Models
         [StringLength(20)]
         public string DayName { get; set; }
 
+        public int Slots { get; set; }
     }
 }

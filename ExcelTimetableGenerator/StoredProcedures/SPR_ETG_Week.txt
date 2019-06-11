@@ -1,0 +1,14 @@
+CREATE PROCEDURE [dbo].[SPR_ETG_Week]
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+	SELECT
+		WK.WeekID,
+		WK.WeekNum,
+		WK.WeekDesc,
+		WK.Notes
+	FROM ETG_Week WK
+	ORDER BY
+		WK.WeekID
+END

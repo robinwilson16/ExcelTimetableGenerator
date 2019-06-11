@@ -1,6 +1,7 @@
 CREATE PROCEDURE [dbo].[SPR_ETG_CourseData]
 	@AcademicYear NVARCHAR(5),
-	@PlanRevisionID INT
+	@PlanRevisionID INT,
+	@Course NVARCHAR(50)
 AS
 BEGIN
 	SET NOCOUNT ON;
@@ -60,7 +61,7 @@ BEGIN
 				WHEN CRS.FundingStream = '99' THEN 'Not Funded'
 				WHEN CRS.FundingStream IS NULL THEN '-- Unknown --'
 			END,
-		GroupSize = PGS.GroupSize,
+		GroupSize = COALESCE ( PGS.GroupSize, 1 ),
 		NumGroups = COALESCE ( CAST ( PGS.NoOfGroups AS INT ), 1 ),
 		Notes = NTE.Notes
 	FROM [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.CCS_Offering CRS --Parent
@@ -69,7 +70,7 @@ BEGIN
 		AND PLN.RevisionIdentity = @PlanRevisionID
 	INNER JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.StatusCourse STA
 		ON STA.StatusCourseID = PLN.StatusCourseID
-	INNER JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.PlanGroupSize PGS
+	LEFT JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.PlanGroupSize PGS
 		ON PGS.PlanEntityID = PLN.PlanEntityID
 	LEFT JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.Site STE
 		ON STE.SiteID = CRS.SiteID
@@ -108,6 +109,7 @@ BEGIN
 		ON NTE.PlanEntityID = PLN.PlanEntityID
 	WHERE
 		CRS.AcademicYear = @AcademicYear
+		AND CRS.Code = COALESCE ( @Course, CRS.Code )
 		AND STA.StatusCode = 8 --Running (Approved)
 		AND PAR.OfferingID IS NULL --Parent doesn't have a parent
 
@@ -177,7 +179,7 @@ BEGIN
 				WHEN CRS.FundingStream = '99' THEN 'Not Funded'
 				WHEN CRS.FundingStream IS NULL THEN '-- Unknown --'
 			END,
-		GroupSize = PGS.GroupSize,
+		GroupSize = COALESCE ( PGS.GroupSize, 1 ),
 		NumGroups = COALESCE ( CAST ( PGS.NoOfGroups AS INT ), 1 ),
 		Notes = NTE.Notes
 	FROM [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.CCS_Offering CRS --Child
@@ -195,7 +197,7 @@ BEGIN
 		AND PLNP.RevisionIdentity = @PlanRevisionID
 	INNER JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.StatusCourse STAP
 		ON STAP.StatusCourseID = PLNP.StatusCourseID
-	INNER JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.PlanGroupSize PGS
+	LEFT JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.PlanGroupSize PGS
 		ON PGS.PlanEntityID = PLN.PlanEntityID
 	LEFT JOIN [WLCBA-PROR001M.MIDDLE.MAN].ProResource.dbo.Site STE
 		ON STE.SiteID = CRS.SiteID
@@ -228,6 +230,7 @@ BEGIN
 		ON NTE.PlanEntityID = PLN.PlanEntityID
 	WHERE
 		CRS.AcademicYear = @AcademicYear
+		AND PRG.Code = COALESCE ( @Course, PRG.Code )
 		AND STA.StatusCode = 8 --Running (Approved)
 		AND STAP.StatusCode = 8 --Running (Approved)
 
