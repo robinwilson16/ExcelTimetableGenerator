@@ -22,6 +22,9 @@ using NPOI.SS.UserModel;
 using NPOI.SS.Util;
 using NPOI.Util;
 using NPOI.XSSF.UserModel;
+using Microsoft.Extensions.Hosting;
+using System.Security;
+using System.Security.Permissions;
 
 namespace ExcelTimetableGenerator.Pages
 {
@@ -29,11 +32,11 @@ namespace ExcelTimetableGenerator.Pages
     {
         private readonly ApplicationDbContext _context;
         private readonly IConfiguration _configuration;
-        private IHostingEnvironment _hostingEnvironment;
+        private IWebHostEnvironment _hostingEnvironment;
         public ExportTimetablesModel(
             ApplicationDbContext context,
             IConfiguration configuration,
-            IHostingEnvironment hostingEnvironment
+            IWebHostEnvironment hostingEnvironment
             )
         {
             _context = context;
@@ -85,48 +88,43 @@ namespace ExcelTimetableGenerator.Pages
             SystemVersion = _configuration["Version"];
 
             string CurrentAcademicYear = await AcademicYearFunctions.GetAcademicYear(academicYear, _context);
-            var academicYearParam = new SqlParameter("@AcademicYear", CurrentAcademicYear);
-            var planRevisionIDParam = new SqlParameter("@PlanRevisionID", planRevisionID);
-            var courseParam = new SqlParameter("@Course", SqlDbType.NVarChar);
-            courseParam.Value = (object)course ?? DBNull.Value;
-
 
             //Data from Curriculum Planning
             Course = await _context.Course
-                .FromSql("EXEC SPR_ETG_CourseData @AcademicYear, @PlanRevisionID, @Course", academicYearParam, planRevisionIDParam, courseParam)
+                .FromSqlInterpolated($"EXEC SPR_ETG_CourseData @AcademicYear={CurrentAcademicYear}, @PlanRevisionID={planRevisionID}, @Course={course}")
                 .ToListAsync();
 
             Group = await _context.Group
-                .FromSql("EXEC SPR_ETG_GroupData @AcademicYear, @PlanRevisionID, @Course", academicYearParam, planRevisionIDParam, courseParam)
+                .FromSqlInterpolated($"EXEC SPR_ETG_GroupData @AcademicYear={CurrentAcademicYear}, @PlanRevisionID={planRevisionID}, @Course={course}")
                 .ToListAsync();
 
             Programme = await _context.Programme
-                .FromSql("EXEC SPR_ETG_ProgrammeData @AcademicYear, @PlanRevisionID, @Course", academicYearParam, planRevisionIDParam, courseParam)
+                .FromSqlInterpolated($"EXEC SPR_ETG_ProgrammeData @AcademicYear={CurrentAcademicYear}, @PlanRevisionID={planRevisionID}, @Course={course}")
                 .ToListAsync();
 
             //Data for Tiemtable Grid
             Day = await _context.Day
-                .FromSql("EXEC SPR_ETG_Day")
+                .FromSqlInterpolated($"EXEC SPR_ETG_Day")
                 .ToListAsync();
 
             Time = await _context.Time
-                .FromSql("EXEC SPR_ETG_Time")
+                .FromSqlInterpolated($"EXEC SPR_ETG_Time")
                 .ToListAsync();
 
             TimetableSection = await _context.TimetableSection
-                .FromSql("EXEC SPR_ETG_TimetableSection")
+                .FromSqlInterpolated($"EXEC SPR_ETG_TimetableSection")
                 .ToListAsync();
 
             Week = await _context.Week
-                .FromSql("EXEC SPR_ETG_Week")
+                .FromSqlInterpolated($"EXEC SPR_ETG_Week")
                 .ToListAsync();
 
             TermDate = await _context.TermDate
-                .FromSql("EXEC SPR_ETG_TermDate")
+                .FromSqlInterpolated($"EXEC SPR_ETG_TermDate")
                 .ToListAsync();
 
             BankHoliday = await _context.BankHoliday
-                .FromSql("EXEC SPR_ETG_BankHoliday")
+                .FromSqlInterpolated($"EXEC SPR_ETG_BankHoliday")
                 .ToListAsync();
 
             SavePath = _hostingEnvironment.WebRootPath + @"\ExportedTimetables";
@@ -139,8 +137,28 @@ namespace ExcelTimetableGenerator.Pages
             int colNum = 0;
             NumFilesExported = 0;
 
+            //Check permissions for main output directory
+            string outputPath = _hostingEnvironment.WebRootPath + @"\images\CollegeLogo.png";
+            var permissionSetOutputPath = new PermissionSet(PermissionState.None);
+            var writePermissionOutputPath = new FileIOPermission(FileIOPermissionAccess.Write, outputPath);
+            permissionSetOutputPath.AddPermission(writePermissionOutputPath);
+
             //College Logo
-            var collegeLogoStream = new System.IO.FileStream(_hostingEnvironment.WebRootPath + @"\images\CollegeLogo.png", System.IO.FileMode.Open);
+            string collegeLogoPath = _hostingEnvironment.WebRootPath + @"\images\CollegeLogo.png";
+            var permissionSetCollegeLogo = new PermissionSet(PermissionState.None);
+            var readPermissionCollegeLogo = new FileIOPermission(FileIOPermissionAccess.Read, collegeLogoPath);
+            permissionSetCollegeLogo.AddPermission(readPermissionCollegeLogo);
+
+            if (permissionSetOutputPath.IsSubsetOf(AppDomain.CurrentDomain.PermissionSet))
+            {
+                //Can't write to output path -- add code to handle
+            }
+            else if (permissionSetCollegeLogo.IsSubsetOf(AppDomain.CurrentDomain.PermissionSet))
+            {
+                //Can't read college logo -- add code to handle
+            }
+
+            var collegeLogoStream = new System.IO.FileStream(collegeLogoPath, System.IO.FileMode.Open);
             byte[] bytes = IOUtils.ToByteArray(collegeLogoStream);
             collegeLogoStream.Close();
             collegeLogoStream.Dispose();

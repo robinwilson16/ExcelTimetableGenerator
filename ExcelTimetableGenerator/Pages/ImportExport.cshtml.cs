@@ -11,13 +11,14 @@ using Microsoft.AspNetCore.Mvc.RazorPages;
 using NPOI.HSSF.UserModel;
 using NPOI.SS.UserModel;
 using NPOI.XSSF.UserModel;
+using Microsoft.Extensions.Hosting;
 
 namespace ExcelTimetableGenerator.Pages
 {
     public class ImportExportModel : PageModel
     {
-        private IHostingEnvironment _hostingEnvironment;
-        public ImportExportModel(IHostingEnvironment hostingEnvironment)
+        private IWebHostEnvironment _hostingEnvironment;
+        public ImportExportModel(IWebHostEnvironment hostingEnvironment)
         {
             _hostingEnvironment = hostingEnvironment;
         }

@@ -18,9 +18,10 @@ namespace ExcelTimetableGenerator.Shared
             if (academicYear == null)
             {
                 //Get value from database
-                ConfigData = await _context.Config
-                    .FromSql("EXEC SPR_ETG_Config")
-                    .FirstOrDefaultAsync();
+                ConfigData = (await _context.Config
+                    .FromSqlInterpolated($"EXEC SPR_ETG_Config")
+                    .ToListAsync())
+                    .FirstOrDefault();
 
                 currentAcademicYear = ConfigData.AcademicYear;
             }
@@ -35,9 +36,10 @@ namespace ExcelTimetableGenerator.Shared
         public static async Task<string> GetDefaultAcademicYear(ApplicationDbContext _context)
         {
             //Get value from database
-            ConfigData = await _context.Config
-                .FromSql("EXEC SPR_ETG_Config")
-                .FirstOrDefaultAsync();
+            ConfigData = (await _context.Config
+                .FromSqlInterpolated($"EXEC SPR_ETG_Config")
+                .ToListAsync())
+                .FirstOrDefault();
 
             return ConfigData.AcademicYear;
         }

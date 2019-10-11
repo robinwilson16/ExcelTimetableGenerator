@@ -54,11 +54,9 @@ namespace ExcelTimetableGenerator.Pages
             SystemVersion = _configuration["Version"];
 
             string CurrentAcademicYear = await AcademicYearFunctions.GetAcademicYear(academicYear, _context);
-            var academicYearParam = new SqlParameter("@AcademicYear", CurrentAcademicYear);
-            var planRevisionIDParam = new SqlParameter("@PlanRevisionID", planRevisionID);
 
             ProgrammeSelectList = await _context.SelectListData
-                .FromSql("EXEC SPR_ETG_ProgrammeSelectList @AcademicYear, @PlanRevisionID", academicYearParam, planRevisionIDParam)
+                .FromSqlInterpolated($"EXEC SPR_ETG_ProgrammeSelectList @AcademicYear={CurrentAcademicYear}, @PlanRevisionID={planRevisionID}")
                 .ToListAsync();
 
             ViewData["CourseSL"] = new SelectList(ProgrammeSelectList, "Code", "Description");
