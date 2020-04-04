@@ -78,9 +78,37 @@ function generateTimetables(academicYear, courseCode) {
         })
             .then(data => {
                 let ttb = JSON.parse(data);
+                let haveReadPermission = (ttb.timetables.haveReadPermission == "True");
+                let haveWritePermission = (ttb.timetables.haveWritePermission == "True");
+                let outputPath = ttb.timetables.outputPath;
                 $("#NumFilesGenerated").html(ttb.timetables.numFilesExported);
                 $("#GenerationInProgressDialog").modal("hide");
-                $("#GenerationCompleteModal").modal();
+
+                if (haveReadPermission === false) {
+                    let title = `Error Generating Timetables`;
+                    let content = `
+                        Sorry an error occurred generating the files as this web application does not have permission to read data in the following folder:
+                        <div class="pre-scrollable small">
+                            <p><code>${outputPath}</code></p>
+                        </div>
+                        `;
+
+                    doErrorModal(title, content, "lg");
+                }
+                else if (haveWritePermission === false) {
+                    let title = `Error Generating Timetables`;
+                    let content = `
+                        Sorry an error occurred generating the files as this web application does not have permission to write to the following folder:
+                        <div class="pre-scrollable small">
+                            <p><code>${outputPath}</code></p>
+                        </div>
+                        `;
+
+                    doErrorModal(title, content, "lg");
+                }
+                else {
+                    $("#GenerationCompleteModal").modal(); 
+                }
                 //doModal(
                 //    "Generation Complete",
                 //    `Timetables have been successfully generated: 
