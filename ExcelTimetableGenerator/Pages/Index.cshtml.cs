@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using ExcelTimetableGenerator.Data;
 using ExcelTimetableGenerator.Models;
 using ExcelTimetableGenerator.Shared;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using Microsoft.AspNetCore.Mvc.Rendering;
@@ -14,6 +16,7 @@ using Microsoft.Extensions.Configuration;
 
 namespace ExcelTimetableGenerator.Pages
 {
+    [Authorize(Roles = "ALLSTAFF")]
     public class IndexModel : PageModel
     {
         private readonly ApplicationDbContext _context;
@@ -30,10 +33,17 @@ namespace ExcelTimetableGenerator.Pages
         public string UserGreeting { get; set; }
         public string SystemVersion { get; set; }
 
+        public Guid SessionID { get; set; }
+
         public IList<SelectListData> ProgrammeSelectList { get; set; }
 
         public async Task OnGetAsync(string academicYear, int plan, string course)
         {
+            Guid sessionID = Guid.NewGuid();
+            //HttpContext.Session.SetString("SessionID", sessionID.ToString());
+            SessionID = sessionID;
+            //SessionID = Guid.Parse(HttpContext.Session.GetString("SessionID"));
+
             int planRevisionID = 0;
 
             if (plan >= 1)

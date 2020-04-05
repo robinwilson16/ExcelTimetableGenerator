@@ -84,11 +84,10 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-success DownloadButton"><i class="fas fa-file-archive"></i> Download Zip File Containing Timetables</button>
+                <a class="btn btn-success DownloadButton" role="button" href="" download="Timetables.zip"><i class="fas fa-file-archive"></i> Download Zip File Containing Timetables</a>
                 <button type="button" class="btn btn-danger CancelButton" data-dismiss="modal"><i class="fas fa-sign-out-alt"></i> Cancel</button>
             </div>
         </div>
     </div>
 </div>
-<iframe id="DownloadZipFrame">
-</iframe>
+<input type="hidden" id="SessionID" value="@Model.SessionID" />

@@ -25,9 +25,11 @@ using NPOI.XSSF.UserModel;
 using Microsoft.Extensions.Hosting;
 using System.Security;
 using System.Security.Permissions;
+using Microsoft.AspNetCore.Authorization;
 
 namespace ExcelTimetableGenerator.Pages
 {
+    [Authorize(Roles = "ALLSTAFF")]
     public class ExportTimetablesModel : PageModel
     {
         private readonly ApplicationDbContext _context;
@@ -49,8 +51,10 @@ namespace ExcelTimetableGenerator.Pages
         public string UserGreeting { get; set; }
         public string SystemVersion { get; set; }
 
-        public string SavePath { get; set; }
+        public string ExportParentPath { get; set; }
         public string ZipPath { get; set; }
+        public string ExportPath { get; set; }
+        
 
         public int NumFilesExported { get; set; }
 
@@ -66,7 +70,7 @@ namespace ExcelTimetableGenerator.Pages
         public IList<TermDate> TermDate { get; set; }
         public IList<BankHoliday> BankHoliday { get; set; }
 
-        public async Task<IActionResult> OnGetAsync(string academicYear, int plan, string course)
+        public async Task<IActionResult> OnGetAsync(Guid sessionID, string academicYear, int plan, string course)
         {
             int planRevisionID = 0;
 
@@ -127,52 +131,54 @@ namespace ExcelTimetableGenerator.Pages
                 .FromSqlInterpolated($"EXEC SPR_ETG_BankHoliday")
                 .ToListAsync();
 
-            SavePath = _hostingEnvironment.WebRootPath + @"\ExportedTimetables";
-            ZipPath = _hostingEnvironment.WebRootPath + @"\Output";
+            ExportParentPath = _hostingEnvironment.WebRootPath + @"\Exports";
+            ZipPath = _hostingEnvironment.WebRootPath + @"\Exports\" + sessionID.ToString();
+            ExportPath = _hostingEnvironment.WebRootPath + @"\Exports\" + sessionID.ToString() + @"\TTB";
             
+
             NumFilesExported = 0;
 
             bool haveReadPermission = true;
             bool haveWritePermission = true;
             string outputPath = "";
 
-            //Check permissions for save path - is wwwroot folder as creates temp directory there
+            //Delete previous exports older than a certain number of days
+            bool deletedOldFolders = DeleteOldFolders();
+
+            //Check permissions for export path
             try
             {
-                string filePath = SavePath + @"\";
+                string filePath = ZipPath;
 
                 if (!Directory.Exists(filePath))
                 {
-                    Directory.CreateDirectory(filePath);
+                    Directory.CreateDirectory(filePath);  
+                }
+
+                //Delete directory again as we will get a file exists error when exporting later
+                if (Directory.Exists(filePath))
+                {
+                    Directory.Delete(filePath, true);
                 }
             }
             catch (UnauthorizedAccessException)
             {
                 //Can't write to save path
                 haveWritePermission = false;
-                outputPath = SavePath;
+                outputPath = ZipPath;
             }
-
-            //Check permissions for zip path - creates zip file in output folder
-            var permissionSetZipPath = new PermissionSet(PermissionState.None);
-            var writePermissionZipPath = new FileIOPermission(FileIOPermissionAccess.Write, ZipPath);
-            permissionSetZipPath.AddPermission(writePermissionZipPath);
 
             //College Logo
             string collegeLogoPath = _hostingEnvironment.WebRootPath + @"\images\CollegeLogo.png";
-            var permissionSetCollegeLogo = new PermissionSet(PermissionState.None);
-            var readPermissionCollegeLogo = new FileIOPermission(FileIOPermissionAccess.Read, collegeLogoPath);
-            permissionSetCollegeLogo.AddPermission(readPermissionCollegeLogo);
-
-            if (!permissionSetZipPath.IsSubsetOf(AppDomain.CurrentDomain.PermissionSet))
+            try
             {
-                //Can't write to zip path
-                haveWritePermission = false;
-                outputPath = ZipPath;
+                var collegeLogoStream = new System.IO.FileStream(collegeLogoPath, System.IO.FileMode.Open);
+                collegeLogoStream.Close();
+                collegeLogoStream.Dispose();
             }
-            else if (!permissionSetCollegeLogo.IsSubsetOf(AppDomain.CurrentDomain.PermissionSet))
+            catch (UnauthorizedAccessException)
             {
-                //Can't read college logo -- add code to handle
+                //Can't read logo
                 haveReadPermission = false;
                 outputPath = collegeLogoPath;
             }
@@ -180,7 +186,7 @@ namespace ExcelTimetableGenerator.Pages
             //Only continue if web app has write permissions to the target or temp folders
             if (haveWritePermission == true)
             {
-                NumFilesExported = await WriteExcelFilesAsync(CurrentAcademicYear, Programme, collegeLogoPath);
+                NumFilesExported = await WriteExcelFilesAsync(CurrentAcademicYear, Programme, collegeLogoPath, haveReadPermission, haveWritePermission);
             }
             
             string result = 
@@ -190,8 +196,37 @@ namespace ExcelTimetableGenerator.Pages
             return Content(result);
         }
 
-        public async Task<int> WriteExcelFilesAsync(string CurrentAcademicYear, IList<Programme> Programme, string collegeLogoPath)
+        public bool DeleteOldFolders()
         {
+            int minutesToKeepFolders = int.Parse(_configuration.GetSection("SystemSettings")["MinutesToKeepFolders"]);
+
+            try
+            {
+                string[] folders = Directory.GetDirectories(ExportParentPath);
+
+                foreach (string folder in folders)
+                {
+                    DirectoryInfo directoryInfo = new DirectoryInfo(folder);
+                    if (directoryInfo.CreationTime < DateTime.Now.AddHours(-minutesToKeepFolders))
+                        directoryInfo.Delete(true);
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public async Task<int> WriteExcelFilesAsync(string CurrentAcademicYear, IList<Programme> Programme, string collegeLogoPath, bool haveReadPermission, bool haveWritePermission)
+        {
+            // If cannot write to folder then no point continuing
+            if (!haveWritePermission)
+            {
+                return 0;
+            }
+            
             string filePath = null;
             string fileName = null;
             string fileURL = null;
@@ -199,25 +234,33 @@ namespace ExcelTimetableGenerator.Pages
             int startAtRowNum = 0;
             int colNum = 0;
             int numFilesSaved = 0;
+            int programmeNameMaxLength = int.Parse(_configuration.GetSection("SystemSettings")["ProgrammeNameMaxLength"]);
 
-            var collegeLogoStream = new System.IO.FileStream(collegeLogoPath, System.IO.FileMode.Open);
-            byte[] bytes = IOUtils.ToByteArray(collegeLogoStream);
-            collegeLogoStream.Close();
-            collegeLogoStream.Dispose();
+            byte[] bytes = null;
+            //Only include college logo if it could be accessed
+            if (haveReadPermission == true)
+            {
+                var collegeLogoStream = new System.IO.FileStream(collegeLogoPath, System.IO.FileMode.Open);
+                bytes = IOUtils.ToByteArray(collegeLogoStream);
+                collegeLogoStream.Close();
+                collegeLogoStream.Dispose();
+            }
+
+            //Create folder with session id
+            filePath = ZipPath;
+            if (!Directory.Exists(filePath))
+            {
+                Directory.CreateDirectory(filePath);
+            }
 
             //Create Master Excel Programme List
             if (Programme != null && Programme.Count > 0)
             {
-                filePath = SavePath + @"\";
+                filePath = ExportPath + @"\";
 
                 if (!Directory.Exists(filePath))
                 {
                     Directory.CreateDirectory(filePath);
-
-                    if (Directory.Exists(filePath))
-                    {
-                        Directory.Delete(filePath, true);
-                    }
                 }
 
                 //Generate each Excel workbook
@@ -237,8 +280,13 @@ namespace ExcelTimetableGenerator.Pages
                     IClientAnchor anchor;
                     IPicture picture;
 
-                    //Add college logo
-                    int collegeLogo = workbook.AddPicture(bytes, PictureType.PNG);
+                    //Only include college logo if it could be accessed
+                    int collegeLogo = 0;
+                    if (haveReadPermission == true)
+                    {
+                        //Add college logo
+                        collegeLogo = workbook.AddPicture(bytes, PictureType.PNG);
+                    }
 
                     //For date formatting
                     ICreationHelper createHelper = workbook.GetCreationHelper();
@@ -331,7 +379,11 @@ namespace ExcelTimetableGenerator.Pages
                     anchor.Row1 = 0;
                     anchor.Col2 = 11;
                     anchor.Row2 = 1;
-                    picture = drawing.CreatePicture(anchor, collegeLogo);
+
+                    if (haveReadPermission == true)
+                    {
+                        picture = drawing.CreatePicture(anchor, collegeLogo);
+                    }
 
                     cell = row.CreateCell(0);
 
@@ -413,10 +465,11 @@ namespace ExcelTimetableGenerator.Pages
                     {
                         rowNum += 1;
                         row = sheet.CreateRow(rowNum);
-
-                        progFileName = FileFunctions.MakeValidFileName(programme.ProgCode + @" - " + programme.ProgTitle + @".xlsx"); //Sanitize
-                        progFolder = @"/ExportedTimetables/" + programme.FacCode + @"/" + programme.TeamCode + @"/";
-                        progFileURL = string.Format("{0}://{1}/{2}", Request.Scheme, Request.Host, progFolder + progFileName).Replace(" ", "%20");
+ 
+                        progFileName = FileFunctions.MakeValidFileName(FileFunctions.ShortenString(programme.ProgCode + @" - " + programme.ProgTitle, programmeNameMaxLength) + @".xlsx"); //Sanitize
+                        progFolder = programme.FacCode + @"/" + programme.TeamCode + @"/";
+                        //progFileURL = FileFunctions.FormatHyperlink(string.Format("{0}://{1}/{2}", Request.Scheme, Request.Host, progFolder + progFileName));
+                        progFileURL = FileFunctions.FormatHyperlink(progFolder + progFileName);
                         link.Address = progFileURL;
 
                         cell = row.CreateCell(0, ctString);
@@ -490,7 +543,7 @@ namespace ExcelTimetableGenerator.Pages
                     numFilesSaved += 1;
 
                     //Save timetables into departmental and team folders (creates a folder if it doesn't exist)
-                    filePath = SavePath + @"\" + programme.FacCode + @"\" + programme.TeamCode + @"\";
+                    filePath = ExportPath + @"\" + programme.FacCode + @"\" + programme.TeamCode + @"\";
 
                     if (!Directory.Exists(filePath))
                     {
@@ -498,9 +551,8 @@ namespace ExcelTimetableGenerator.Pages
                     }
 
                     //Generate each Excel workbook
-                    fileName = @"" + programme.ProgCode + " - " + programme.ProgTitle + ".xlsx";
-                    fileName = FileFunctions.MakeValidFileName(fileName); //Sanitize
-                    fileURL = string.Format("{0}://{1}/{2}", Request.Scheme, Request.Host, fileName);
+                    fileName = FileFunctions.MakeValidFileName(FileFunctions.ShortenString(programme.ProgCode + @" - " + programme.ProgTitle, programmeNameMaxLength) + @".xlsx"); //Sanitize
+                    fileURL = FileFunctions.FormatHyperlink(string.Format("{0}://{1}/{2}", Request.Scheme, Request.Host, fileName));
                     FileInfo file = new FileInfo(Path.Combine(filePath, fileName));
                     var memory = new MemoryStream();
                     using (var fs = new FileStream(Path.Combine(filePath, fileName), FileMode.Create, FileAccess.Write))
@@ -514,8 +566,12 @@ namespace ExcelTimetableGenerator.Pages
                         IClientAnchor anchor;
                         IPicture picture;
 
-                        //Add college logo
-                        int collegeLogo = workbook.AddPicture(bytes, PictureType.PNG);
+                        int collegeLogo = 0;
+                        if (haveReadPermission == true)
+                        {
+                            //Add college logo
+                            collegeLogo = workbook.AddPicture(bytes, PictureType.PNG);
+                        }
 
                         //For date formatting
                         ICreationHelper createHelper = workbook.GetCreationHelper();
@@ -843,7 +899,11 @@ namespace ExcelTimetableGenerator.Pages
                         anchor.Row1 = 0;
                         anchor.Col2 = 13;
                         anchor.Row2 = 1;
-                        picture = drawing.CreatePicture(anchor, collegeLogo);
+
+                        if (haveReadPermission == true)
+                        {
+                            picture = drawing.CreatePicture(anchor, collegeLogo);
+                        }
 
                         cell = row.CreateCell(0);
 
@@ -1102,7 +1162,11 @@ namespace ExcelTimetableGenerator.Pages
                                 anchor.Row1 = 0;
                                 anchor.Col2 = 53;
                                 anchor.Row2 = 1;
-                                picture = drawing.CreatePicture(anchor, collegeLogo);
+
+                                if (haveReadPermission == true)
+                                {
+                                    picture = drawing.CreatePicture(anchor, collegeLogo);
+                                }
 
                                 cell = row.CreateCell(0);
 
@@ -2439,18 +2503,12 @@ namespace ExcelTimetableGenerator.Pages
             }
 
             //Now create a compressed zip file with all timetables in deleting any previous zips
-            if (Directory.Exists(ZipPath))
-            {
-                Directory.Delete(ZipPath, true);
-            }
+            ZipFile.CreateFromDirectory(ExportPath, ZipPath + @"\Timetables.zip");
 
-            Directory.CreateDirectory(ZipPath);
-            ZipFile.CreateFromDirectory(SavePath, ZipPath + @"\Timetables.zip");
-
-            //Now delete the folder where the timetables were generated
-            if (Directory.Exists(SavePath))
+            //Now delete the folder where the timetables were generated leaving just the zip file in the folder
+            if (Directory.Exists(ExportPath))
             {
-                Directory.Delete(SavePath, true);
+                Directory.Delete(ExportPath, true);
             }
 
             return numFilesSaved;

@@ -34,13 +34,27 @@ $("#GenerateOneTimetableButton").click(function (event) {
 });
 
 $(".DownloadButton").click(function (event) {
-    let zipFileLocation = "/Output/Timetables.zip";
-    $("#DownloadZipFrame").attr("src", zipFileLocation);
+    let sessionID = $("#SessionID").val();
+    url = `/Exports/${sessionID}/Timetables.zip`;
+    event.originalEvent.currentTarget.href = url;
+
+    $('#GenerationCompleteModal').modal('hide')
 });
 
 function generateTimetables(academicYear, courseCode) {
     return new Promise(resolve => {
-        let dataToLoad = `/ExportTimetables/?academicYear=${academicYear}`;
+        let sessionID = $("#SessionID").val();
+
+        if (sessionID == null) {
+            let title = `Error Generating Timetables`;
+            let content = `Sorry the system was unable to determine your session ID.`;
+
+            doErrorModal(title, content);
+
+            return;
+        }
+
+        let dataToLoad = `/ExportTimetables/${sessionID}/?academicYear=${academicYear}`;
 
         if (courseCode !== null) {
             dataToLoad += `&course=${courseCode}`;

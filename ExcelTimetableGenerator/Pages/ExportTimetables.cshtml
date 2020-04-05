@@ -1,11 +1,11 @@
-﻿@page
+﻿@page "{sessionID:Guid}"
 @model ExcelTimetableGenerator.Pages.ExportTimetablesModel
 @{
     ViewData["Title"] = "Export Timetables";
 }
 
 <h1>ImportExport</h1>
-<h2>@Model.SavePath</h2>
+<h2>@Model.ExportPath</h2>
 Number of files exported: @Model.NumFilesExported
 
 <form method="post" enctype="multipart/form-data">
