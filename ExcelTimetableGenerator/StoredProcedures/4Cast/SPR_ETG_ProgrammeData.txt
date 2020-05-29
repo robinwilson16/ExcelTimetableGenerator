@@ -1,0 +1,37 @@
+CREATE PROCEDURE [dbo].[SPR_ETG_ProgrammeData]
+	@AcademicYear NVARCHAR(5),
+	@PlanRevisionID INT,
+	@Course NVARCHAR(50)
+AS
+BEGIN
+	SET NOCOUNT ON;
+
+	--DECLARE @Course NVARCHAR(50) = 'ARTL211002'
+
+	SELECT
+		ProgrammeID = COALESCE ( FC.ProgID, 0 ),
+		SiteCode = FC.UDF19,
+		SiteName = FC.UDF19,
+		FacCode = FC.UDF04,
+		FacName = FC.UDF05,
+		TeamCode = FC.TeamCode,
+		TeamName = FC.TeamName,
+		ProgCode = FC.ProgCode,
+		ProgTitle = FC.ProgTitle,
+		ModeOfAttendanceCode = FC.UDF16,
+		ModeOfAttendanceName = FC.UDF16,
+		ProgStatus = FC.ApprovalStatusName,
+		PLH1618 = FC.PLH,
+		PLH19 = FC.PLH,
+		PLHMax = FC.PLH,
+		EEP1618 = FC.EEP,
+		EEP19 = FC.EEP,
+		EEPMax = FC.EEP
+	FROM [WLCBA-FCST001A].wlc.dbo.VW_4CA_4Cast2020Data FC
+	WHERE
+		FC.ProgCode = COALESCE ( @Course, FC.ProgCode )
+		AND COALESCE ( FC.ProgID, FC.CourseID ) = FC.CourseID --Is the parent or has no parent
+	ORDER BY
+		FC.ProgCode,
+		FC.CourseCode
+END

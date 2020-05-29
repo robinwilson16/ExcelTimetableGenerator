@@ -47,7 +47,7 @@ BEGIN
 		PRG.AcademicYear = @AcademicYear
 		AND PRG.Code = COALESCE ( @Course, PRG.Code )
 		AND PAR.OfferingID IS NULL --Parent doesn't have a parent
-		AND STA.StatusCode = 8 --Running (Approved)
+		AND STA.StatusCode IN ( 6, 7, 8 ) --Running
 	ORDER BY
 		PRG.Code,
 		GRP.GroupCode

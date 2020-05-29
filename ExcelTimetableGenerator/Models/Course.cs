@@ -13,10 +13,10 @@ namespace ExcelTimetableGenerator.Models
 
         public int ProgrammeID { get; set; }
 
-        [StringLength(20)]
+        [StringLength(250)]
         public string SiteCode { get; set; }
 
-        [StringLength(100)]
+        [StringLength(250)]
         public string SiteName { get; set; }
 
         [StringLength(72)]
@@ -27,7 +27,7 @@ namespace ExcelTimetableGenerator.Models
 
         public bool? IsMainCourse { get; set; }
 
-        [StringLength(40)]
+        [StringLength(50)]
         public string CourseStatus { get; set; }
 
         public int CourseOrder { get; set; }
@@ -35,7 +35,7 @@ namespace ExcelTimetableGenerator.Models
         [StringLength(8)]
         public string AimCode { get; set; }
 
-        [StringLength(8)]
+        [StringLength(150)]
         public string AwardBody { get; set; }
 
         [DataType(DataType.Date)]
@@ -60,10 +60,10 @@ namespace ExcelTimetableGenerator.Models
         public int? YearNo { get; set; }
         public int? NoOfYears { get; set; }
 
-        [StringLength(2)]
+        [StringLength(250)]
         public string ModeOfAttendanceCode { get; set; }
 
-        [StringLength(50)]
+        [StringLength(250)]
         public string ModeOfAttendanceName { get; set; }
 
         [StringLength(2)]

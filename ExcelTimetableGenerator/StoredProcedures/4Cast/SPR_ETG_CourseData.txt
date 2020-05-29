@@ -1,0 +1,92 @@
+CREATE PROCEDURE [dbo].[SPR_ETG_CourseData]
+	@AcademicYear NVARCHAR(5),
+	@PlanRevisionID INT,
+	@Course NVARCHAR(50)
+AS
+BEGIN
+	SET NOCOUNT ON;
+	
+	--DECLARE @Course NVARCHAR(50) = 'ARTL211002'
+
+	SELECT
+		CourseID = FC.CourseID,
+		ProgrammeID = COALESCE ( FC.ProgID, 0 ),
+		SiteCode = FC.UDF19,
+		SiteName = FC.UDF19,
+		CourseCode = FC.CourseCode,
+		CourseTitle = FC.CourseTitle,
+		IsMainCourse = CAST ( COALESCE ( FC.IsMainAim, 0 ) AS BIT ),
+		CourseStatus = FC.ApprovalStatusName,
+		CourseOrder = 
+			CASE
+				WHEN FC.IsMainAim = 1 THEN 1
+				WHEN FC.CourseCode LIKE '%FS%' OR FC.CourseTitle LIKE '%Func%' THEN 3
+				WHEN FC.CourseCode LIKE '%GCSE%' OR FC.CourseTitle LIKE '%Func%' THEN 4
+				WHEN FC.CourseCode LIKE '%-TUT%' THEN 5
+				WHEN FC.CourseCode LIKE '%Tut%' THEN 5
+				WHEN FC.CourseCode LIKE '%-WEX%' THEN 6
+				WHEN FC.CourseCode LIKE '%-DSS%' THEN 7
+				WHEN COALESCE ( FC.AimCode, '00000000' ) = '00000000' THEN 8
+				ELSE 2
+			END,
+		AimCode = FC.AimCode,
+		AwardBody = FC.AwardBody,
+		StartDate = FC.StartDate,
+		EndDate = FC.EndDate,
+		PLH1618 = FC.PLH,
+		PLH19 = FC.PLH,
+		PLHMax = FC.PLH,
+		EEP1618 = FC.EEP,
+		EEP19 = FC.EEP,
+		EEPMax = FC.EEP,
+		HoursPerWeek = 
+			CAST (
+				ROUND (
+					CASE
+						WHEN COALESCE ( TRY_CAST ( FC.UDF18 AS FLOAT ), 0 ) = 0 THEN 0
+						ELSE CAST ( ( FC.PLH + FC.EEP ) AS FLOAT ) / CAST ( COALESCE ( TRY_CAST ( FC.UDF18 AS FLOAT ), 0 ) AS FLOAT )
+					END,
+					4
+				)
+			AS DECIMAL (10, 4 ) ),
+		Weeks = COALESCE ( TRY_CAST ( FC.UDF18 AS INT ), 0 ),
+		YearNo = COALESCE ( TRY_CAST ( FC.UDF11 AS INT ), 0 ),
+		NoOfYears = FC.NumYears,
+		ModeOfAttendanceCode = FC.UDF16,
+		ModeOfAttendanceName = FC.UDF16,
+		FundStream = CAST ( FC.FundStream AS VARCHAR(2) ),
+		FundSource = CAST ( FC.FundSource AS VARCHAR(3) ),
+		ProgType = FORMAT ( FC.ProgTypeCode, '#00' ),
+		FundModel = 
+			CASE
+				WHEN FC.FundStream = '25' THEN '16-19 Funded'
+				WHEN FC.ProgTypeCode = '25' THEN 'App Standard'
+				WHEN FC.FundStream = '36' THEN 'App Standard'
+				WHEN FC.FundStream IN ( '35', '36' ) AND FC.ProgTypeCode IS NOT NULL THEN 'App Framework'
+				WHEN FC.FundStream = '35' THEN 'AEB Funded'
+				WHEN FC.FundSource = '1' THEN 'Higher Education'
+				WHEN FC.FundStream = '99' THEN 'Not Funded'
+				ELSE '-- Unknown --'
+			END,
+		GroupSize = 
+			COALESCE ( TRY_CAST ( 
+				CASE
+					WHEN COALESCE ( TRY_CAST ( FC.UDF22 AS DECIMAL(10, 2) ), 0 ) = 0 THEN 0
+					ELSE 
+						CAST ( FC.TarEnrolsTot AS FLOAT )
+						/
+						CAST ( COALESCE ( TRY_CAST ( FC.UDF22 AS DECIMAL(10, 2) ), 0 ) AS FLOAT )
+				END
+			AS INT ), 0 ), 	
+		NumGroups = COALESCE ( TRY_CAST ( FC.UDF22 AS INT ), 0 ),
+		Notes = FC.Notes
+		--INTO ForecastData
+	FROM [WLCBA-FCST001A].wlc.dbo.VW_4CA_4Cast2020Data FC
+	WHERE
+		FC.ProgCode = COALESCE ( @Course, FC.ProgCode )
+	--WHERE
+		--FC.ProgCode = 'ARTL111001'
+	ORDER BY
+		FC.ProgCode,
+		FC.CourseCode
+END
