@@ -387,7 +387,7 @@ namespace ExcelTimetableGenerator.Pages
 
                     cell = row.CreateCell(0);
 
-                    cell.SetCellValue("Master List of Programmes from ProResource for " + CurrentAcademicYear);
+                    cell.SetCellValue("Master List of Programmes from 4Cast 2020 for " + CurrentAcademicYear);
                     cell.CellStyle = sHeader;
 
                     //Merge header row
@@ -447,7 +447,7 @@ namespace ExcelTimetableGenerator.Pages
                     sheet.SetColumnWidth(1, 8 * 256);
                     sheet.SetColumnWidth(2, 20 * 256);
                     sheet.SetColumnWidth(3, 8 * 256);
-                    sheet.SetColumnWidth(4, 20 * 256);
+                    sheet.SetColumnWidth(4, 40 * 256);
                     sheet.SetColumnWidth(5, 16 * 256);
                     sheet.SetColumnWidth(6, 60 * 256);
                     sheet.SetColumnWidth(7, 16 * 256);
@@ -591,10 +591,12 @@ namespace ExcelTimetableGenerator.Pages
                         XSSFColor cDSS = new XSSFColor(Color.Lavender);
                         XSSFColor cTut = new XSSFColor(Color.LightCyan);
                         XSSFColor cOther = new XSSFColor(Color.NavajoWhite);
+                        XSSFColor cWhite = new XSSFColor(Color.White);
 
                         XSSFColor cEarlySlots = new XSSFColor(Color.LavenderBlush);
                         XSSFColor cLateSlots = new XSSFColor(Color.Lavender);
                         XSSFColor cWeeklyHours = new XSSFColor(Color.Honeydew);
+                        XSSFColor cDaySectionName = new XSSFColor(Color.DeepSkyBlue);
 
                         //Cell Borders
                         BorderStyle bLight = BorderStyle.Thin;
@@ -616,6 +618,9 @@ namespace ExcelTimetableGenerator.Pages
                         //Table Header
                         IFont fBold = workbook.CreateFont();
                         fBold.IsBold = true;
+
+                        IFont fWhite = workbook.CreateFont();
+                        fWhite.Color = IndexedColors.White.Index;
 
                         //Cell formats
                         //Page Header
@@ -685,6 +690,18 @@ namespace ExcelTimetableGenerator.Pages
                         sWeeklyHours.BorderBottom = bLight;
                         sWeeklyHours.BorderLeft = bLight;
                         sWeeklyHours.BorderRight = bLight;
+
+                        //Timetable Grid DaySection
+                        XSSFCellStyle sDaySectionNameLast = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sDaySectionNameLast.SetFont(fWhite);
+                        sDaySectionNameLast.SetFillForegroundColor(cDaySectionName);
+                        sDaySectionNameLast.FillPattern = FillPattern.SolidForeground;
+                        sDaySectionNameLast.BorderBottom = bMedium;
+
+                        XSSFCellStyle sDaySectionName = (XSSFCellStyle)workbook.CreateCellStyle();
+                        sDaySectionName.SetFont(fWhite);
+                        sDaySectionName.SetFillForegroundColor(cDaySectionName);
+                        sDaySectionName.FillPattern = FillPattern.SolidForeground;
 
                         //Merged Right
                         XSSFCellStyle sMergedRightTotal = (XSSFCellStyle)workbook.CreateCellStyle();
@@ -943,34 +960,26 @@ namespace ExcelTimetableGenerator.Pages
                         cell.CellStyle = sTableHeader;
 
                         cell = row.CreateCell(6, ctString);
-                        cell.SetCellValue("Planned Learning Hours 16-18");
+                        cell.SetCellValue("Planned Learning Hours");
                         cell.CellStyle = sTableHeader;
 
                         cell = row.CreateCell(7, ctString);
-                        cell.SetCellValue("Planned EEP Hours 16-18");
+                        cell.SetCellValue("Planned EEP Hours");
                         cell.CellStyle = sTableHeader;
 
                         cell = row.CreateCell(8, ctString);
-                        cell.SetCellValue("Planned Learning Hours 19+");
-                        cell.CellStyle = sTableHeader;
-
-                        cell = row.CreateCell(9, ctString);
-                        cell.SetCellValue("Planned EEP Hours 19+");
-                        cell.CellStyle = sTableHeader;
-
-                        cell = row.CreateCell(10, ctString);
                         cell.SetCellValue("Start Date");
                         cell.CellStyle = sTableHeader;
 
-                        cell = row.CreateCell(11, ctString);
+                        cell = row.CreateCell(9, ctString);
                         cell.SetCellValue("End Date");
                         cell.CellStyle = sTableHeader;
 
-                        cell = row.CreateCell(12, ctString);
+                        cell = row.CreateCell(10, ctString);
                         cell.SetCellValue("Site");
                         cell.CellStyle = sTableHeader;
 
-                        cell = row.CreateCell(13, ctString);
+                        cell = row.CreateCell(11, ctString);
                         cell.SetCellValue("Notes");
                         cell.CellStyle = sTableHeader;
 
@@ -978,18 +987,15 @@ namespace ExcelTimetableGenerator.Pages
                         sheet.SetColumnWidth(0, 16 * 256);
                         sheet.SetColumnWidth(1, 40 * 256);
                         sheet.SetColumnWidth(2, 14 * 256);
-                        sheet.SetColumnWidth(3, 12 * 256);
+                        sheet.SetColumnWidth(3, 30 * 256);
                         sheet.SetColumnWidth(4, 8 * 256);
                         sheet.SetColumnWidth(5, 8 * 256);
                         sheet.SetColumnWidth(6, 10 * 256);
                         sheet.SetColumnWidth(7, 10 * 256);
-                        sheet.SetColumnWidth(8, 10 * 256);
-                        sheet.SetColumnWidth(9, 10 * 256);
-                        sheet.SetColumnWidth(10, 12 * 256);
-                        sheet.SetColumnWidth(11, 12 * 256);
-                        sheet.SetColumnWidth(12, 20 * 256);
-                        sheet.SetColumnWidth(13, 20 * 256);
-                        sheet.SetColumnWidth(14, 20 * 256);
+                        sheet.SetColumnWidth(8, 12 * 256);
+                        sheet.SetColumnWidth(9, 12 * 256);
+                        sheet.SetColumnWidth(10, 20 * 256);
+                        sheet.SetColumnWidth(11, 20 * 256);
 
                         //The current row in the worksheet
                         rowNum = 2;
@@ -1079,46 +1085,32 @@ namespace ExcelTimetableGenerator.Pages
                                 cell.CellStyle = cellStyle;
 
                                 cell = row.CreateCell(6, ctNumber);
-                                if (crs.PLH1618 >= 0)
+                                if (crs.PLHMax >= 0)
                                 {
-                                    cell.SetCellValue((double)crs.PLH1618);
+                                    cell.SetCellValue((double)crs.PLHMax);
                                 }
                                 cell.CellStyle = cellStyle;
 
                                 cell = row.CreateCell(7, ctNumber);
-                                if (crs.EEP1618 >= 0)
+                                if (crs.EEPMax >= 0)
                                 {
-                                    cell.SetCellValue((double)crs.EEP1618);
+                                    cell.SetCellValue((double)crs.EEPMax);
                                 }
                                 cell.CellStyle = cellStyle;
 
                                 cell = row.CreateCell(8, ctNumber);
-                                if (crs.PLH19 >= 0)
-                                {
-                                    cell.SetCellValue((double)crs.PLH19);
-                                }
-                                cell.CellStyle = cellStyle;
-
-                                cell = row.CreateCell(9, ctNumber);
-                                if (crs.EEP19 >= 0)
-                                {
-                                    cell.SetCellValue((double)crs.EEP19);
-                                }
-                                cell.CellStyle = cellStyle;
-
-                                cell = row.CreateCell(10, ctNumber);
                                 cell.CellStyle = cellStyleDate;
                                 cell.SetCellValue((DateTime)crs.StartDate);
 
-                                cell = row.CreateCell(11, ctNumber);
+                                cell = row.CreateCell(9, ctNumber);
                                 cell.CellStyle = cellStyleDate;
                                 cell.SetCellValue((DateTime)crs.EndDate);
 
-                                cell = row.CreateCell(12, ctString);
+                                cell = row.CreateCell(10, ctString);
                                 cell.SetCellValue(crs.SiteName);
                                 cell.CellStyle = cellStyle;
 
-                                cell = row.CreateCell(13, ctString);
+                                cell = row.CreateCell(11, ctString);
                                 cell.SetCellValue(crs.Notes);
                                 cell.CellStyle = cellStyle;
                             }
@@ -1524,6 +1516,19 @@ namespace ExcelTimetableGenerator.Pages
                                                 cell = row.CreateCell(1, ctString);
                                                 cell.SetCellValue(section.SectionName);
 
+                                                if(section.SectionName == "Full Year/Weeks numbers")
+                                                {
+                                                    cell.CellStyle = sDaySectionNameLast;
+                                                }
+                                                else if (section.SectionName == "Staff Name")
+                                                {
+                                                    //No Style
+                                                }
+                                                else
+                                                {
+                                                    cell.CellStyle = sDaySectionName;
+                                                }
+
                                                 colNum = 1;
 
                                                 XSSFCellStyle cellStyle;
@@ -1589,7 +1594,7 @@ namespace ExcelTimetableGenerator.Pages
                                 sheet.AddMergedRegion(region);
 
                                 sheet.SetColumnWidth(0, 4 * 256);
-                                sheet.SetColumnWidth(1, 30 * 256);
+                                sheet.SetColumnWidth(1, 32 * 256);
 
                                 sheet.SetColumnWidth(52, 8 * 256);
                                 sheet.SetColumnWidth(53, 16 * 256);
@@ -2349,6 +2354,10 @@ namespace ExcelTimetableGenerator.Pages
                             cell.SetCellValue("Notes");
                             cell.CellStyle = sTableHeader;
 
+                            cell = row.CreateCell(3, ctString);
+                            cell.SetCellValue("Other Details");
+                            cell.CellStyle = sTableHeader;
+
                             rowNum = 2;
 
                             foreach (var week in Week)
@@ -2370,12 +2379,17 @@ namespace ExcelTimetableGenerator.Pages
                                 cell = row.CreateCell(2, ctString);
                                 cell.SetCellValue(week.Notes);
                                 cell.CellStyle = sBorderMedium;
+
+                                cell = row.CreateCell(3, ctString);
+                                cell.SetCellValue(week.Notes2);
+                                cell.CellStyle = sBorderMedium;
                             }
 
                             //Column widths
                             sheet.SetColumnWidth(0, 8 * 256);
                             sheet.SetColumnWidth(1, 20 * 256);
                             sheet.SetColumnWidth(2, 20 * 256);
+                            sheet.SetColumnWidth(3, 40 * 256);
                         }
 
                         if (TermDate != null && TermDate.Count > 0)
@@ -2455,7 +2469,7 @@ namespace ExcelTimetableGenerator.Pages
 
                             //Column widths
                             sheet.SetColumnWidth(0, 20 * 256);
-                            sheet.SetColumnWidth(1, 50 * 256);
+                            sheet.SetColumnWidth(1, 90 * 256);
 
                             if (BankHoliday != null && BankHoliday.Count > 0)
                             {

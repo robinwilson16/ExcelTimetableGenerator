@@ -17,5 +17,9 @@ namespace ExcelTimetableGenerator.Models
 
         [StringLength(255)]
         public string Notes { get; set; }
+
+        [Display(Name = "Other Details")]
+        [StringLength(255)]
+        public string Notes2 { get; set; }
     }
 }

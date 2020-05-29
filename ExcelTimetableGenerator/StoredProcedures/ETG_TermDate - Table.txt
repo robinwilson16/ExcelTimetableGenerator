@@ -3,5 +3,6 @@ CREATE TABLE ETG_TermDate (
 	TermDateName NVARCHAR(50),
 	IsTerm BIT,
 	Dates NVARCHAR(255),
+	TermDateOrder INT
 	CONSTRAINT ETG_TermDate_PK PRIMARY KEY ( TermDateID )
 )

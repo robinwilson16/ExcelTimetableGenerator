@@ -10,5 +10,6 @@ BEGIN
 		TD.Dates
 	FROM ETG_TermDate TD
 	ORDER BY
+		TD.TermDateOrder,
 		TD.TermDateID
 END
