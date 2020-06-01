@@ -50,6 +50,7 @@ namespace ExcelTimetableGenerator.Pages
         public string UserDetails { get; set; }
         public string UserGreeting { get; set; }
         public string SystemVersion { get; set; }
+        public string PlanningSystem { get; set; }
 
         public string ExportParentPath { get; set; }
         public string ZipPath { get; set; }
@@ -90,6 +91,8 @@ namespace ExcelTimetableGenerator.Pages
             UserGreeting = Identity.GetGreeting();
 
             SystemVersion = _configuration["Version"];
+
+            PlanningSystem = _configuration.GetSection("SystemSettings")["PlanningSystem"];
 
             string CurrentAcademicYear = await AcademicYearFunctions.GetAcademicYear(academicYear, _context);
 
@@ -221,6 +224,8 @@ namespace ExcelTimetableGenerator.Pages
 
         public async Task<int> WriteExcelFilesAsync(string CurrentAcademicYear, IList<Programme> Programme, string collegeLogoPath, bool haveReadPermission, bool haveWritePermission)
         {
+            PlanningSystem = _configuration.GetSection("SystemSettings")["PlanningSystem"];
+
             // If cannot write to folder then no point continuing
             if (!haveWritePermission)
             {
@@ -387,7 +392,7 @@ namespace ExcelTimetableGenerator.Pages
 
                     cell = row.CreateCell(0);
 
-                    cell.SetCellValue("Master List of Programmes from 4Cast 2020 for " + CurrentAcademicYear);
+                    cell.SetCellValue("Master List of Programmes from " + PlanningSystem + " for " + CurrentAcademicYear);
                     cell.CellStyle = sHeader;
 
                     //Merge header row

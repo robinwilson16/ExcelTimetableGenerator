@@ -33,6 +33,8 @@ namespace ExcelTimetableGenerator.Pages
         public string UserGreeting { get; set; }
         public string SystemVersion { get; set; }
 
+        public string PlanningSystem { get; set; }
+
         public Guid SessionID { get; set; }
 
         public IList<SelectListData> ProgrammeSelectList { get; set; }
@@ -62,6 +64,8 @@ namespace ExcelTimetableGenerator.Pages
             UserGreeting = Identity.GetGreeting();
 
             SystemVersion = _configuration["Version"];
+
+            PlanningSystem = _configuration.GetSection("SystemSettings")["PlanningSystem"];
 
             string CurrentAcademicYear = await AcademicYearFunctions.GetAcademicYear(academicYear, _context);
 
