@@ -2,6 +2,7 @@
 using ExcelTimetableGenerator.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using SQLitePCL;
 using System;
 using System.Collections.Generic;
 using System.Data.SqlClient;
@@ -23,6 +24,7 @@ namespace ExcelTimetableGenerator.Shared
             return userName;
         }
         public static StaffMember StaffMember { get; set; }
+        
         public static async Task<string> GetFullName(string academicYear, string username, ApplicationDbContext _context)
         {
             string CurrentAcademicYear = await AcademicYearFunctions.GetAcademicYear(academicYear, _context);

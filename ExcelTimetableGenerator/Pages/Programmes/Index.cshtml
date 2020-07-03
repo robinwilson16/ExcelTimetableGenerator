@@ -1,0 +1,132 @@
+﻿@page
+@model ExcelTimetableGenerator.Pages.Programmes.IndexModel
+
+@{
+    ViewData["Title"] = "Index";
+}
+
+<h1>Index</h1>
+
+<p>
+    <a asp-page="Create">Create New</a>
+</p>
+<table class="table">
+    <thead>
+        <tr>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].SiteCode)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].SiteName)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].FacCode)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].FacName)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].TeamCode)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].TeamName)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].ProgCode)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].ProgTitle)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].ModeOfAttendanceCode)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].ModeOfAttendanceName)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].ProgStatus)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].PLH1618)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].PLH19)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].PLHMax)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].EEP1618)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].EEP19)
+            </th>
+            <th>
+                @Html.DisplayNameFor(model => model.Programme[0].EEPMax)
+            </th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+@foreach (var item in Model.Programme) {
+        <tr>
+            <td>
+                @Html.DisplayFor(modelItem => item.SiteCode)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.SiteName)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.FacCode)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.FacName)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.TeamCode)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.TeamName)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.ProgCode)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.ProgTitle)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.ModeOfAttendanceCode)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.ModeOfAttendanceName)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.ProgStatus)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.PLH1618)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.PLH19)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.PLHMax)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.EEP1618)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.EEP19)
+            </td>
+            <td>
+                @Html.DisplayFor(modelItem => item.EEPMax)
+            </td>
+            <td>
+                <a asp-page="./Edit" asp-route-id="@item.ProgrammeID">Edit</a> |
+                <a asp-page="./Details" asp-route-id="@item.ProgrammeID">Details</a> |
+                <a asp-page="./Delete" asp-route-id="@item.ProgrammeID">Delete</a>
+            </td>
+        </tr>
+}
+    </tbody>
+</table>

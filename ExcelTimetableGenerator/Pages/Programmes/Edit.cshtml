@@ -1,0 +1,115 @@
+﻿@page
+@model ExcelTimetableGenerator.Pages.Programmes.EditModel
+
+@{
+    ViewData["Title"] = "Edit";
+}
+
+<h1>Edit</h1>
+
+<h4>Programme</h4>
+<hr />
+<div class="row">
+    <div class="col-md-4">
+        <form method="post">
+            <div asp-validation-summary="ModelOnly" class="text-danger"></div>
+            <input type="hidden" asp-for="Programme.ProgrammeID" />
+            <div class="form-group">
+                <label asp-for="Programme.SiteCode" class="control-label"></label>
+                <input asp-for="Programme.SiteCode" class="form-control" />
+                <span asp-validation-for="Programme.SiteCode" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.SiteName" class="control-label"></label>
+                <input asp-for="Programme.SiteName" class="form-control" />
+                <span asp-validation-for="Programme.SiteName" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.FacCode" class="control-label"></label>
+                <input asp-for="Programme.FacCode" class="form-control" />
+                <span asp-validation-for="Programme.FacCode" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.FacName" class="control-label"></label>
+                <input asp-for="Programme.FacName" class="form-control" />
+                <span asp-validation-for="Programme.FacName" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.TeamCode" class="control-label"></label>
+                <input asp-for="Programme.TeamCode" class="form-control" />
+                <span asp-validation-for="Programme.TeamCode" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.TeamName" class="control-label"></label>
+                <input asp-for="Programme.TeamName" class="form-control" />
+                <span asp-validation-for="Programme.TeamName" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.ProgCode" class="control-label"></label>
+                <input asp-for="Programme.ProgCode" class="form-control" />
+                <span asp-validation-for="Programme.ProgCode" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.ProgTitle" class="control-label"></label>
+                <input asp-for="Programme.ProgTitle" class="form-control" />
+                <span asp-validation-for="Programme.ProgTitle" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.ModeOfAttendanceCode" class="control-label"></label>
+                <input asp-for="Programme.ModeOfAttendanceCode" class="form-control" />
+                <span asp-validation-for="Programme.ModeOfAttendanceCode" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.ModeOfAttendanceName" class="control-label"></label>
+                <input asp-for="Programme.ModeOfAttendanceName" class="form-control" />
+                <span asp-validation-for="Programme.ModeOfAttendanceName" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.ProgStatus" class="control-label"></label>
+                <input asp-for="Programme.ProgStatus" class="form-control" />
+                <span asp-validation-for="Programme.ProgStatus" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.PLH1618" class="control-label"></label>
+                <input asp-for="Programme.PLH1618" class="form-control" />
+                <span asp-validation-for="Programme.PLH1618" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.PLH19" class="control-label"></label>
+                <input asp-for="Programme.PLH19" class="form-control" />
+                <span asp-validation-for="Programme.PLH19" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.PLHMax" class="control-label"></label>
+                <input asp-for="Programme.PLHMax" class="form-control" />
+                <span asp-validation-for="Programme.PLHMax" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.EEP1618" class="control-label"></label>
+                <input asp-for="Programme.EEP1618" class="form-control" />
+                <span asp-validation-for="Programme.EEP1618" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.EEP19" class="control-label"></label>
+                <input asp-for="Programme.EEP19" class="form-control" />
+                <span asp-validation-for="Programme.EEP19" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <label asp-for="Programme.EEPMax" class="control-label"></label>
+                <input asp-for="Programme.EEPMax" class="form-control" />
+                <span asp-validation-for="Programme.EEPMax" class="text-danger"></span>
+            </div>
+            <div class="form-group">
+                <input type="submit" value="Save" class="btn btn-primary" />
+            </div>
+        </form>
+    </div>
+</div>
+
+<div>
+    <a asp-page="./Index">Back to List</a>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

@@ -1,0 +1,121 @@
+﻿@page "{course}"
+@model ExcelTimetableGenerator.Pages.Programmes.DetailsModel
+
+@{
+    ViewData["Title"] = "Details";
+}
+
+<h1>Details</h1>
+
+<div>
+    <h4>Programme</h4>
+    <hr />
+    <dl class="row">
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.SiteCode)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.SiteCode)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.SiteName)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.SiteName)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.FacCode)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.FacCode)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.FacName)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.FacName)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.TeamCode)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.TeamCode)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.TeamName)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.TeamName)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.ProgCode)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.ProgCode)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.ProgTitle)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.ProgTitle)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.ModeOfAttendanceCode)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.ModeOfAttendanceCode)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.ModeOfAttendanceName)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.ModeOfAttendanceName)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.ProgStatus)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.ProgStatus)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.PLH1618)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.PLH1618)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.PLH19)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.PLH19)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.PLHMax)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.PLHMax)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.EEP1618)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.EEP1618)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.EEP19)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.EEP19)
+        </dd>
+        <dt class="col-sm-2">
+            @Html.DisplayNameFor(model => model.Programme.EEPMax)
+        </dt>
+        <dd class="col-sm-10">
+            @Html.DisplayFor(model => model.Programme.EEPMax)
+        </dd>
+    </dl>
+</div>
+<div>
+    <a asp-page="./Edit" asp-route-id="@Model.Programme.ProgrammeID">Edit</a> |
+    <a asp-page="./Index">Back to List</a>
+</div>

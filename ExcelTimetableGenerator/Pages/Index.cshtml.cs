@@ -61,7 +61,7 @@ namespace ExcelTimetableGenerator.Pages
 
             UserDetails = await Identity.GetFullName(academicYear, User.Identity.Name.Split('\\').Last(), _context);
 
-            UserGreeting = Identity.GetGreeting();
+            UserGreeting = User.Identity.Name.Split('\\').Last();
 
             SystemVersion = _configuration["Version"];
 

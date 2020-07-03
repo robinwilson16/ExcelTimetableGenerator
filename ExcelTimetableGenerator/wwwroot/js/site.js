@@ -1,4 +1,10 @@
-﻿$("#GenerateTimetablesButton").click(function (event) {
+﻿$("#CourseCodeID").keyup(function (event) {
+    if (event.keyCode == 13) {
+        $("#GenerateOneTimetableButton").trigger("click");
+    }
+});
+
+$("#GenerateTimetablesButton").click(function (event) {
     let academicYear = $("#AcademicYearID").val();
 
     if (academicYear === "") {
@@ -29,7 +35,49 @@ $("#GenerateOneTimetableButton").click(function (event) {
         doModal(title, content);
     }
     else {
-        generateTimetables(academicYear, course);
+        let dataToLoad = `/Programmes/Details/${course}/?handler=Json`;
+
+        let title = `Checking Course Data`;
+        let content = `
+            <div class="container">
+                <div class="row">
+                    <div class="col-md-3">
+                        <h1 class="LoadingAnim"><i class="fas fa-spinner fa-spin"></i></h1>
+                    </div>
+                    <div class="col-md-9">
+                        <p>
+                            Please wait whilst course data is validated
+                        </p>
+                    </div>
+                </div>
+            </div>`;
+
+        doModal(
+            title,
+            content,
+            null,
+            "CheckingCourseDialog"
+        );
+
+        $.get(dataToLoad, function (data) {
+
+        })
+            .then(data => {
+                console.log(dataToLoad + " Loaded");
+
+                $("#CheckingCourseDialog").modal("hide");
+
+                if (data.programme != null) {
+                    generateTimetables(academicYear, course);
+                }
+                else {
+                    let title = `Course Invalid`;
+                    let content = `The course code you entered is not a valid course code: "${course}".<br />Please try again.`;
+
+                    doModal(title, content);
+                    $("#CourseCodeID").val("");
+                }
+            });
     }
 });
 
@@ -121,7 +169,8 @@ function generateTimetables(academicYear, courseCode) {
                     doErrorModal(title, content, "lg");
                 }
                 else {
-                    $("#GenerationCompleteModal").modal(); 
+                    $("#GenerationCompleteModal").modal();
+                    $("#CourseCodeID").val("");
                 }
                 //doModal(
                 //    "Generation Complete",
