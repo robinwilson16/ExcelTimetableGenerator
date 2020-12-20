@@ -40,12 +40,12 @@ namespace ExcelTimetableGenerator
             services.AddDbContext<ApplicationDbContext>(options =>
                 options.UseSqlServer(
                     Configuration.GetConnectionString("DefaultConnection")));
-
+            services.AddDatabaseDeveloperPageExceptionFilter();
             services.AddRazorPages();
 
             //Enable configuration options directly in _Layout
             services.Configure<SystemSettings>
-                (Configuration.GetSection("System"));
+                (Configuration.GetSection("SystemSettings"));
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -54,6 +54,7 @@ namespace ExcelTimetableGenerator
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
+                app.UseMigrationsEndPoint();
             }
             else
             {
