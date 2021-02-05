@@ -12,21 +12,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@ViewData["Title"] - ExcelTimetableGenerator</title>
 
-    <environment include="Development">
-        <link rel="stylesheet" href="~/lib/twitter-bootstrap/css/bootstrap.css" />
-        <link rel="stylesheet" href="~/lib/font-awesome/css/all.css" />
-    </environment>
-    <environment exclude="Development">
-        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.4.1/css/bootstrap.min.css"
-              asp-fallback-href="~/lib/twitter-bootstrap/css/bootstrap.min.css"
-              asp-fallback-test-class="sr-only" asp-fallback-test-property="position" asp-fallback-test-value="absolute"
-              crossorigin="anonymous" />
-        <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.11.2/css/all.css"
-              crossorigin="anonymous"
-              asp-fallback-href="~/lib/font-awesome/css/all.min.css"
-              asp-fallback-test-class="sr-only" asp-fallback-test-property="position" asp-fallback-test-value="absolute" />
-    </environment>
+    <link rel="stylesheet" href="~/lib/twitter-bootstrap/css/bootstrap.min.css" asp-append-version="true">
+    <link rel="stylesheet" href="~/lib/font-awesome/css/all.min.css" asp-append-version="true" />
+    <link rel="stylesheet" href="~/lib/ekko-lightbox/ekko-lightbox.css" asp-append-version="true">
+
     <link rel="stylesheet" href="~/css/site.css" />
+    <link href="https://fonts.googleapis.com/css?family=Roboto:300,400" rel="stylesheet">
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top">
@@ -80,31 +71,21 @@
                     @ApplicationSettings.Value.PlanningSystem
                 </div>
                 <div class="col-md-3 text-right">
-                    <span class="text-muted">&copy; 2019-2020 - Excel Timetable Generator @ApplicationSettings.Value.Version</span>
+                    <span class="text-muted">&copy; 2019-2021 - Excel Timetable Generator @ApplicationSettings.Value.Version</span>
                 </div>
             </div>
         </div>
     </footer>
 
+    <script src="~/lib/jquery/dist/jquery.min.js" asp-append-version="true"></script>
+    <script src="~/lib/twitter-bootstrap/js/bootstrap.bundle.min.js" asp-append-version="true"></script>
+    <script src="~/lib/momentjs/moment-with-locales.min.js" asp-append-version="true"></script>
+    <script src="~/lib/marked/marked.min.js" asp-append-version="true"></script>
+    <script src="~/lib/ekko-lightbox/ekko-lightbox.min.js" asp-append-version="true"></script>
+    <script src="~/lib/ScrollMagic/ScrollMagic.min.js" asp-append-version="true"></script>
+
     <environment include="Development">
-        <script src="~/lib/jquery/dist/jquery.js" asp-append-version="true"></script>
-        <script src="~/lib/twitter-bootstrap/js/bootstrap.bundle.js" asp-append-version="true"></script>
-        <script src="~/lib/marked/marked.js" asp-append-version="true"></script>
-    </environment>
-    <environment exclude="Development">
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.4.1/jquery.min.js"
-                asp-fallback-src="~/lib/jquery/dist/jquery.min.js"
-                asp-fallback-test="window.jQuery"
-                crossorigin="anonymous">
-        </script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.4.1/js/bootstrap.bundle.min.js"
-                asp-fallback-src="~/lib/twitter-bootstrap/js/bootstrap.bundle.min.js"
-                asp-fallback-test="window.jQuery"
-                crossorigin="anonymous">
-        </script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/0.8.0/marked.min.js"
-                crossorigin="anonymous">
-        </script>
+        <script src="~/lib/ScrollMagic/plugins/debug.addIndicators.js" asp-append-version="true"></script>
     </environment>
 
     <script src="~/js/modals.js" asp-append-version="true"></script>
