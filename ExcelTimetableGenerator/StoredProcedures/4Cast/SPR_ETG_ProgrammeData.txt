@@ -27,7 +27,7 @@ BEGIN
 		EEP1618 = FC.EEP,
 		EEP19 = FC.EEP,
 		EEPMax = FC.EEP
-	FROM [WLCBA-FCST001A].wlc.dbo.VW_4CA_4Cast2020Data FC
+	FROM [WLCBA-FCST001A].wlc.dbo.VW_4CA_4Cast2021Data FC
 	WHERE
 		FC.ProgCode = COALESCE ( @Course, FC.ProgCode )
 		AND COALESCE ( FC.ProgID, FC.CourseID ) = FC.CourseID --Is the parent or has no parent

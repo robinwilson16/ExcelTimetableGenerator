@@ -471,8 +471,8 @@ namespace ExcelTimetableGenerator.Pages
                         rowNum += 1;
                         row = sheet.CreateRow(rowNum);
  
-                        progFileName = FileFunctions.MakeValidFileName(FileFunctions.ShortenString(programme.ProgCode + @" - " + programme.ProgTitle, programmeNameMaxLength) + @".xlsx"); //Sanitize
-                        progFolder = programme.FacCode + @"/" + programme.TeamCode + @"/";
+                        progFileName = FileFunctions.MakeValidFileName(FileFunctions.ShortenString(programme.ProgCode?.Trim() + @" - " + programme.ProgTitle?.Trim(), programmeNameMaxLength) + @".xlsx"); //Sanitize
+                        progFolder = programme.FacCode?.Trim() + @"/" + programme.TeamCode?.Trim() + @"/";
                         //progFileURL = FileFunctions.FormatHyperlink(string.Format("{0}://{1}/{2}", Request.Scheme, Request.Host, progFolder + progFileName));
                         progFileURL = FileFunctions.FormatHyperlink(progFolder + progFileName);
                         link.Address = progFileURL;
@@ -548,7 +548,7 @@ namespace ExcelTimetableGenerator.Pages
                     numFilesSaved += 1;
 
                     //Save timetables into departmental and team folders (creates a folder if it doesn't exist)
-                    filePath = ExportPath + @"\" + programme.FacCode + @"\" + programme.TeamCode + @"\";
+                    filePath = ExportPath + @"\" + programme.FacCode?.Trim() + @"\" + programme.TeamCode?.Trim() + @"\";
 
                     if (!Directory.Exists(filePath))
                     {
@@ -556,7 +556,7 @@ namespace ExcelTimetableGenerator.Pages
                     }
 
                     //Generate each Excel workbook
-                    fileName = FileFunctions.MakeValidFileName(FileFunctions.ShortenString(programme.ProgCode + @" - " + programme.ProgTitle, programmeNameMaxLength) + @".xlsx"); //Sanitize
+                    fileName = FileFunctions.MakeValidFileName(FileFunctions.ShortenString(programme.ProgCode?.Trim() + @" - " + programme.ProgTitle?.Trim(), programmeNameMaxLength) + @".xlsx"); //Sanitize
                     fileURL = FileFunctions.FormatHyperlink(string.Format("{0}://{1}/{2}", Request.Scheme, Request.Host, fileName));
                     FileInfo file = new FileInfo(Path.Combine(filePath, fileName));
                     var memory = new MemoryStream();
