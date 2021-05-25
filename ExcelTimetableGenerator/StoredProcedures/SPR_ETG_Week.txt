@@ -1,15 +1,21 @@
 CREATE PROCEDURE [dbo].[SPR_ETG_Week]
+	@AcademicYear NVARCHAR(5)
 AS
 BEGIN
 	SET NOCOUNT ON;
 
+	--DECLARE @AcademicYear NVARCHAR(5) = N'21/22'
+
 	SELECT
 		WK.WeekID,
+		WK.AcademicYearID,
 		WK.WeekNum,
 		WK.WeekDesc,
 		WK.Notes,
 		WK.Notes2
 	FROM ETG_Week WK
+	WHERE
+		WK.AcademicYearID = @AcademicYear
 	ORDER BY
 		WK.WeekID
 END

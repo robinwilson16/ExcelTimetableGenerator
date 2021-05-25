@@ -1,12 +1,18 @@
 CREATE PROCEDURE [dbo].[SPR_ETG_BankHoliday]
+	@AcademicYear NVARCHAR(5)
 AS
 BEGIN
 	SET NOCOUNT ON;
 
+	--DECLARE @AcademicYear NVARCHAR(5) = N'21/22'
+
 	SELECT
 		BH.BankHolidayID,
+		BH.AcademicYearID,
 		BH.BankHolidayDesc
 	FROM ETG_BankHoliday BH
+	WHERE
+		BH.AcademicYearID = @AcademicYear
 	ORDER BY
 		BH.BankHolidayID
 END

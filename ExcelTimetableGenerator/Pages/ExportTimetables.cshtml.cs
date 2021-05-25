@@ -63,7 +63,7 @@ namespace ExcelTimetableGenerator.Pages
         public IList<Course> Course { get; set; }
         public IList<Group> Group { get; set; }
 
-        public IList<Day> Day { get; set; }
+        public IList<DaySlot> DaySlot { get; set; }
         public IList<Time> Time { get; set; }
         public IList<TimetableSection> TimetableSection { get; set; }
 
@@ -110,8 +110,8 @@ namespace ExcelTimetableGenerator.Pages
                 .ToListAsync();
 
             //Data for Tiemtable Grid
-            Day = await _context.Day
-                .FromSqlInterpolated($"EXEC SPR_ETG_Day")
+            DaySlot = await _context.DaySlot
+                .FromSqlInterpolated($"EXEC SPR_ETG_Day @AcademicYear={CurrentAcademicYear}")
                 .ToListAsync();
 
             Time = await _context.Time
@@ -123,15 +123,15 @@ namespace ExcelTimetableGenerator.Pages
                 .ToListAsync();
 
             Week = await _context.Week
-                .FromSqlInterpolated($"EXEC SPR_ETG_Week")
+                .FromSqlInterpolated($"EXEC SPR_ETG_Week @AcademicYear={CurrentAcademicYear}")
                 .ToListAsync();
 
             TermDate = await _context.TermDate
-                .FromSqlInterpolated($"EXEC SPR_ETG_TermDate")
+                .FromSqlInterpolated($"EXEC SPR_ETG_TermDate @AcademicYear={CurrentAcademicYear}")
                 .ToListAsync();
 
             BankHoliday = await _context.BankHoliday
-                .FromSqlInterpolated($"EXEC SPR_ETG_BankHoliday")
+                .FromSqlInterpolated($"EXEC SPR_ETG_BankHoliday @AcademicYear={CurrentAcademicYear}")
                 .ToListAsync();
 
             ExportParentPath = _hostingEnvironment.WebRootPath + @"\Exports";
@@ -1500,9 +1500,9 @@ namespace ExcelTimetableGenerator.Pages
                                 //Draw timetable grid
                                 //The current row in the worksheet
                                 rowNum = 10;
-                                if (Day != null && Day.Count > 0)
+                                if (DaySlot != null && DaySlot.Count > 0)
                                 {
-                                    foreach (var day in Day)
+                                    foreach (var day in DaySlot)
                                     {
                                         startAtRowNum = rowNum + 1;
 
@@ -1569,7 +1569,7 @@ namespace ExcelTimetableGenerator.Pages
 
                                                 colNum += 1;
                                                 cell = row.CreateCell(colNum, ctNumber);
-                                                cell.SetCellValue(day.Slots);
+                                                cell.SetCellValue(day.NumSlots);
                                                 cell.CellStyle = sMergedCentredTotal;
                                             }
                                         }

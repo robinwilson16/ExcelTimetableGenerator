@@ -1,12 +1,16 @@
 CREATE PROCEDURE [dbo].[SPR_ETG_Day]
+	@AcademicYear NVARCHAR(5)
 AS
 BEGIN
 	SET NOCOUNT ON;
 
+	--DECLARE @AcademicYear NVARCHAR(5) = N'21/22'
+
 	SELECT
-		DayID = CAST ( CNT.RowNum AS INT ),
+		DaySlotID = CAST ( CNT.RowNum AS INT ),
+		AcademicYearID = @AcademicYear,
 		DayName = DATENAME ( WEEKDAY, CNT.RowNum - 1 ),
-		Slots = SLT.NumSlots
+		NumSlots = COALESCE ( SLT.NumSlots, 0 )
 	FROM (
 		SELECT
 			RowNum = 
@@ -18,6 +22,7 @@ BEGIN
 	) CNT
 	LEFT JOIN ETG_DaySlot SLT
 		ON SLT.DaySlotID = CNT.RowNum
+		AND SLT.AcademicYearID = @AcademicYear
 	WHERE
 		CNT.RowNum <= 5
 	ORDER BY

@@ -1,14 +1,21 @@
 CREATE PROCEDURE [dbo].[SPR_ETG_TermDate]
+	@AcademicYear NVARCHAR(5)
 AS
 BEGIN
 	SET NOCOUNT ON;
 
+	--DECLARE @AcademicYear NVARCHAR(5) = N'21/22'
+
 	SELECT
 		TD.TermDateID,
+		TD.AcademicYearID,
 		TD.TermDateName,
 		TD.IsTerm,
-		TD.Dates
+		TD.Dates,
+		TD.TermDateOrder
 	FROM ETG_TermDate TD
+	WHERE
+		TD.AcademicYearID = @AcademicYear
 	ORDER BY
 		TD.TermDateOrder,
 		TD.TermDateID
