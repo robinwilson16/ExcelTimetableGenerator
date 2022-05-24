@@ -10,7 +10,7 @@ BEGIN
 	SELECT
 		Code = FC.ProgCode,
 		Description = FC.ProgCode + ' - ' + FC.ProgTitle
-	FROM [WLCBA-FCST001A].wlc.dbo.VW_4CA_4Cast2021Data FC
+	FROM [WLCBA-FCST001A].wlc.dbo.VW_4CA_4Cast2022Data FC
 	WHERE
 		COALESCE ( FC.ProgID, FC.CourseID ) = FC.CourseID --Is the parent or has no parent
 	ORDER BY

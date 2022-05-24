@@ -81,7 +81,7 @@ BEGIN
 		NumGroups = COALESCE ( TRY_CAST ( FC.UDF22 AS INT ), 0 ),
 		Notes = FC.Notes
 		--INTO ForecastData
-	FROM [WLCBA-FCST001A].wlc.dbo.VW_4CA_4Cast2021Data FC
+	FROM [WLCBA-FCST001A].wlc.dbo.VW_4CA_4Cast2022Data FC
 	WHERE
 		FC.ProgCode = COALESCE ( @Course, FC.ProgCode )
 	--WHERE

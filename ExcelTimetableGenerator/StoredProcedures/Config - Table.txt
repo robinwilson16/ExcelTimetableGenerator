@@ -1,0 +1,8 @@
+CREATE TABLE [dbo].[Config](
+	[ConfigID] [nvarchar](50) NOT NULL,
+	[Description] [nvarchar](200) NULL,
+	[Value] [nvarchar](50) NULL,
+ CONSTRAINT [Config_PK] PRIMARY KEY CLUSTERED 
+(
+	[ConfigID] ASC
+)

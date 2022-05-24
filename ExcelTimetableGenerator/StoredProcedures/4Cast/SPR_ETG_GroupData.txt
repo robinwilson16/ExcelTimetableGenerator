@@ -18,7 +18,7 @@ BEGIN
 			ProgID = COALESCE ( FC.ProgID, 0 ),
 			ProgCode = FC.ProgCode,
 			NumGroups = MAX ( COALESCE ( TRY_CAST ( CASE WHEN FC.IsMainAim = 1 THEN FC.UDF22 ELSE 1 END AS INT ), 1 ) ) --Only consider courses that are main aims in this.
-		FROM [WLCBA-FCST001A].wlc.dbo.VW_4CA_4Cast2021Data FC
+		FROM [WLCBA-FCST001A].wlc.dbo.VW_4CA_4Cast2022Data FC
 		WHERE
 			FC.ProgCode = COALESCE ( @Course, FC.ProgCode )
 		GROUP BY
